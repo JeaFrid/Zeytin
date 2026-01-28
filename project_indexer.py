@@ -11,7 +11,7 @@ def generate_project_index(output_file):
         '.dart_tool',
         'dist',
         'venv',
-        
+        "zeytin", "zeytin_err"
         'env', "lock"
     }
 
@@ -29,7 +29,7 @@ def generate_project_index(output_file):
         '.DS_Store', "server.crt", "server.key", "test.py",
         'package-lock.json',
         "analysis_options.yaml",
-        "cert.pem", "key.pem",
+        "cert.pem", "key.pem","analysis_options.yaml","Dockerfile","pubspec.lock",".dockerignore",
         "pubspec.lock",
         'yarn.lock'
     }
