@@ -3,6 +3,7 @@ import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart';
 import 'package:shelf_router/shelf_router.dart';
 import 'package:uuid/uuid.dart';
+import 'package:zeytin/html/hello_world.dart';
 import 'package:zeytin/logic/engine.dart';
 import 'package:zeytin/logic/gatekeeper.dart';
 import 'package:zeytin/routes/account.dart';
@@ -17,7 +18,7 @@ void main() async {
   var zeytinError = Zeytin("./zeytin_err");
 
   router.get('/', (Request request) {
-    return Response.ok('Hello World');
+    return Response.ok(helloWorldHTML);
   });
   accountRoutes(zeytin, router);
   crudRoutes(zeytin, router);
