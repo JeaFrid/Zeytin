@@ -21,7 +21,7 @@ if ! command -v dart &> /dev/null; then
 fi
 
 git clone https://github.com/JeaFrid/Zeytin.git || true
-cd zeytin
+cd Zeytin
 dart pub get
 
 echo -e "\n${YELLOW}>>> Do you want to install and configure Nginx with SSL (Certbot)? (y/n)${NC}"
