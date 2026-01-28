@@ -9,7 +9,7 @@ NC='\033[0m'
 set -e
 clear
 
-echo -e "${CYAN}>>> Zeytin & Nginx + SSL Auto-Installer${NC}"
+echo -e "${CYAN}>>> Zeytin & Nginx Auto-Installer${NC}"
 
 sudo apt-get update -y
 sudo apt-get install -y git curl unzip wget openssl nginx python3-venv
