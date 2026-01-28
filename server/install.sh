@@ -12,7 +12,7 @@ clear
 echo -e "${CYAN}>>> Zeytin & Nginx + SSL Auto-Installer${NC}"
 
 sudo apt-get update -y
-sudo apt-get install -y git curl unzip wget openssl nginx certbot python3-certbot-nginx
+sudo apt-get install -y git curl unzip wget openssl nginx python3-venv
 
 if ! command -v dart &> /dev/null; then
     wget -qO- https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/dart.gpg
@@ -24,7 +24,7 @@ git clone https://github.com/JeaFrid/Zeytin.git || true
 cd Zeytin
 dart pub get
 
-echo -e "\n${YELLOW}>>> Do you want to install and configure Nginx with SSL (Certbot)? (y/n)${NC}"
+echo -e "\n${YELLOW}>>> Do you want to install and configure Nginx with SSL (Certbot via venv)? (y/n)${NC}"
 read -p "Choice: " INSTALL_NGINX
 
 if [[ "$INSTALL_NGINX" == "y" ]]; then
@@ -60,8 +60,16 @@ EOF"
     sudo nginx -t
     sudo systemctl restart nginx
 
-    echo -e "${CYAN}Requesting SSL Certificate via Certbot...${NC}"
-    sudo certbot --nginx -d $DOMAIN_NAME --non-interactive --agree-tos -m $EMAIL_ADDR --redirect
+    echo -e "${CYAN}Setting up isolated Certbot environment...${NC}"
+    sudo rm -rf /opt/certbot
+    sudo mkdir -p /opt/certbot
+    sudo python3 -m venv /opt/certbot/venv
+    sudo /opt/certbot/venv/bin/pip install --upgrade pip
+    sudo /opt/certbot/venv/bin/pip install certbot certbot-nginx
+
+    echo -e "${CYAN}Requesting SSL Certificate via isolated Certbot...${NC}"
+    sudo /opt/certbot/venv/bin/certbot --nginx -d $DOMAIN_NAME --non-interactive --agree-tos -m $EMAIL_ADDR --redirect
+    sudo ln -sf /opt/certbot/venv/bin/certbot /usr/bin/certbot
 
     echo -e "${GREEN}Nginx and SSL configured for $DOMAIN_NAME${NC}"
     echo -e "${YELLOW}Note: Certbot set up a redirect from HTTP to HTTPS automatically.${NC}"
