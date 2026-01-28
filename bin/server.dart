@@ -18,7 +18,10 @@ void main() async {
   var zeytinError = Zeytin("./zeytin_err");
 
   router.get('/', (Request request) {
-    return Response.ok(helloWorldHTML);
+    return Response.ok(helloWorldHTML, headers: {'content-type': 'text/html'});
+  });
+  router.get('/github', (Request request) {
+    return Response.found('https://github.com/JeaFrid/zeytin');
   });
   accountRoutes(zeytin, router);
   crudRoutes(zeytin, router);

@@ -27,7 +27,17 @@ void storageRoutes(Zeytin zeytin, Router router) {
 
     String? token;
     String? truckId;
-    final forbiddenExtensions = ['.exe', '.sh', '.bat', '.php', '.py', '.js'];
+    final forbiddenExtensions = [
+      '.exe',
+      '.sh',
+      '.bat',
+      '.php',
+      '.py',
+      '.js',
+      '.htm',
+      '.html',
+      '.svg',
+    ];
 
     await for (final part in multipartRequest.parts) {
       final contentDisposition = part.headers['content-disposition'];
