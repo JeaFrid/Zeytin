@@ -9,25 +9,27 @@ NC='\033[0m'
 set -e
 clear
 
-echo -e "${CYAN}>>> Zeytin & Nginx Auto-Installer${NC}"
+echo -e "${CYAN}>>> Zeytin & Nginx + SSL Auto-Installer${NC}"
 
 sudo apt-get update -y
-sudo apt-get install -y git curl unzip wget openssl nginx
+sudo apt-get install -y git curl unzip wget openssl nginx certbot python3-certbot-nginx
 
 if ! command -v dart &> /dev/null; then
     wget -qO- https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/dart.gpg
     echo 'deb [signed-by=/usr/share/keyrings/dart.gpg arch=amd64] https://storage.googleapis.com/download.dartlang.org/linux/debian stable main' | sudo tee /etc/apt/sources.list.d/dart.list
     sudo apt-get update -y && sudo apt-get install -y dart
 fi
-git clone https://github.com/JeaFrid/zeytin.git || true
+
+git clone https://github.com/JeaFrid/Zeytin.git || true
 cd zeytin
 dart pub get
 
-echo -e "\n${YELLOW}>>> Do you want to install and configure Nginx? (y/n)${NC}"
+echo -e "\n${YELLOW}>>> Do you want to install and configure Nginx with SSL (Certbot)? (y/n)${NC}"
 read -p "Choice: " INSTALL_NGINX
 
 if [[ "$INSTALL_NGINX" == "y" ]]; then
-    read -p "Enter your Domain or IP (e.g. api.example.com): " DOMAIN_NAME
+    read -p "Enter your Domain (e.g. api.example.com): " DOMAIN_NAME
+    read -p "Enter your Email for SSL Alerts: " EMAIL_ADDR
     
     NGINX_CONF="/etc/nginx/sites-available/zeytin"
     
@@ -36,6 +38,10 @@ if [[ "$INSTALL_NGINX" == "y" ]]; then
 server {
     listen 80;
     server_name $DOMAIN_NAME;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
 
     location / {
         proxy_pass http://127.0.0.1:12852;
@@ -51,8 +57,14 @@ server {
 EOF"
 
     sudo ln -sf $NGINX_CONF /etc/nginx/sites-enabled/
-    sudo nginx -t && sudo systemctl restart nginx
-    echo -e "${GREEN}Nginx configured for $DOMAIN_NAME${NC}"
+    sudo nginx -t
+    sudo systemctl restart nginx
+
+    echo -e "${CYAN}Requesting SSL Certificate via Certbot...${NC}"
+    sudo certbot --nginx -d $DOMAIN_NAME --non-interactive --agree-tos -m $EMAIL_ADDR --redirect
+
+    echo -e "${GREEN}Nginx and SSL configured for $DOMAIN_NAME${NC}"
+    echo -e "${YELLOW}Note: Certbot set up a redirect from HTTP to HTTPS automatically.${NC}"
 fi
 
 echo -e "\n${GREEN}INSTALLATION COMPLETE! Run: dart runner.dart${NC}"
