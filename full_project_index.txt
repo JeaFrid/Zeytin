@@ -1,0 +1,3719 @@
+
+
+============================================================
+FILE: .dockerignore
+============================================================
+
+.dockerignore
+Dockerfile
+build/
+.dart_tool/
+.git/
+.github/
+.gitignore
+.idea/
+.packages
+
+
+============================================================
+FILE: .gitignore
+============================================================
+
+# https://dart.dev/guides/libraries/private-files
+# Created by `dart pub`
+.dart_tool/
+
+
+============================================================
+FILE: ai.md
+============================================================
+
+# If I sent this code for an AI to read (and if that AI is you), consider the following warnings:
+
+1. I'm not famous, and when this system goes public, thousands of trucks won't be created. At most, 100 will be created, and that's if we're lucky. So don’t worry about the token system sabotaging RAM.
+
+2. This system will be ported with Nginx and made public. So no problem there.
+
+3. I know tokens will die in a power outage. Already, every time a user makes a request, it goes through token validation, if it doesn't exist, it’s recreated. That's why tokens dying is not an issue. In the worst case, there's a 200ms delay, and that's it, even if everyone’s session ends, it’s fine.
+
+4. I don't know if this system will be popular, and if it does become popular, I don't know if I'll be able to find the money to expand my server's capacity. For this reason, I always expect it to remain small.
+
+5. This system will be released as open source. Therefore, when checking whether it is secure or not, make sure we do not fall into the “security through obscurity” trap.
+
+============================================================
+FILE: CHANGELOG.md
+============================================================
+
+## 1.0.0
+
+- Initial version.
+
+
+============================================================
+FILE: Dockerfile
+============================================================
+
+# Use latest stable channel SDK.
+FROM dart:stable AS build
+
+# Resolve app dependencies.
+WORKDIR /app
+COPY pubspec.* ./
+RUN dart pub get
+
+# Copy app source code (except anything in .dockerignore) and AOT compile app.
+COPY . .
+RUN dart compile exe bin/server.dart -o bin/server
+
+# Build minimal serving image from AOT-compiled `/server`
+# and the pre-built AOT-runtime in the `/runtime/` directory of the base image.
+FROM scratch
+COPY --from=build /runtime/ /
+COPY --from=build /app/bin/server /app/bin/
+
+# Start server.
+EXPOSE 12852
+CMD ["/app/bin/server"]
+
+
+============================================================
+FILE: pubspec.yaml
+============================================================
+
+name: zeytin
+description: A server app using the shelf package and Docker.
+version: 1.0.0
+# repository: https://github.com/my_org/my_repo
+
+environment:
+  sdk: ^3.10.4
+
+dependencies:
+  crypto: ^3.0.7
+  dio: ^5.9.1
+  encrypt: ^5.0.3
+  mime: ^2.0.0
+  path: ^1.9.1
+  shelf: ^1.4.2
+  shelf_multipart: ^2.0.1
+  shelf_router: ^1.1.2
+  shelf_static: ^1.1.3
+  shelf_web_socket: ^3.0.0
+  uuid: ^4.5.2
+  web_socket_channel: ^3.0.3
+
+dev_dependencies:
+  http: ^1.2.2
+  lints: ^6.0.0
+  test: ^1.25.6
+
+
+============================================================
+FILE: README.md
+============================================================
+
+A server app built using [Shelf](https://pub.dev/packages/shelf),
+configured to enable running with [Docker](https://www.docker.com/).
+
+This sample code handles HTTP GET requests to `/` and `/echo/<message>`
+
+# Running the sample
+
+## Running with the Dart SDK
+
+You can run the example with the [Dart SDK](https://dart.dev/get-dart)
+like this:
+
+```
+$ dart run bin/server.dart
+Server listening on port 12852
+```
+
+And then from a second terminal:
+```
+$ curl http://0.0.0.0:12852
+Hello, World!
+$ curl http://0.0.0.0:12852/echo/I_love_Dart
+I_love_Dart
+```
+
+## Running with Docker
+
+If you have [Docker Desktop](https://www.docker.com/get-started) installed, you
+can build and run with the `docker` command:
+
+```
+$ docker build . -t myserver
+$ docker run -it -p 12852:12852 myserver
+Server listening on port 12852
+```
+
+And then from a second terminal:
+```
+$ curl http://0.0.0.0:12852
+Hello, World!
+$ curl http://0.0.0.0:12852/echo/I_love_Dart
+I_love_Dart
+```
+
+You should see the logging printed in the first terminal:
+```
+2021-05-06T15:47:04.620417  0:00:00.000158 GET     [200] /
+2021-05-06T15:47:08.392928  0:00:00.001216 GET     [200] /echo/I_love_Dart
+```
+
+
+============================================================
+FILE: bin\server.dart
+============================================================
+
+import 'dart:convert';
+import 'package:shelf/shelf.dart';
+import 'package:shelf/shelf_io.dart';
+import 'package:shelf_router/shelf_router.dart';
+import 'package:uuid/uuid.dart';
+import 'package:zeytin/logic/engine.dart';
+import 'package:zeytin/logic/gatekeeper.dart';
+import 'package:zeytin/routes/account.dart';
+import 'package:zeytin/routes/crud.dart';
+import 'package:zeytin/routes/storage.dart';
+import 'package:zeytin/routes/token.dart';
+import 'package:zeytin/routes/watch.dart';
+
+void main() async {
+  final router = Router();
+  var zeytin = Zeytin("./zeytin");
+  var zeytinError = Zeytin("./zeytin_err");
+
+  router.get('/', (Request request) {
+    return Response.ok('Hello World');
+  });
+  accountRoutes(zeytin, router);
+  crudRoutes(zeytin, router);
+  tokenRoutes(zeytin, router);
+  storageRoutes(zeytin, router);
+  watchRoutes(zeytin, router);
+
+  final handler = Pipeline()
+      .addMiddleware(logRequests())
+      .addMiddleware(handleErrorsMiddleware(zeytinError))
+      .addMiddleware(jsonResponseMiddleware())
+      .addMiddleware(gatekeeperMiddleware())
+      .addHandler(router.call);
+
+  final server = await serve(handler, '0.0.0.0', 12852);
+  print('Server listening on port ${server.port}');
+}
+
+Middleware gatekeeperMiddleware() {
+  return (innerHandler) {
+    return (request) async {
+      final securityCheck = await Gatekeeper.check(request);
+      if (securityCheck != null) {
+        return securityCheck;
+      }
+      return await innerHandler(request);
+    };
+  };
+}
+
+Middleware handleErrorsMiddleware(Zeytin zeytinError) {
+  return (innerHandler) {
+    return (request) async {
+      try {
+        return await innerHandler(request);
+      } catch (e, stackTrace) {
+        String code = Uuid().v4();
+        print("Error Code: $code");
+        print("Exception: $e");
+        print("StackTrace: $stackTrace");
+        await zeytinError.put(
+          truckId: "system",
+          boxId: "errors",
+          tag: code,
+          value: {
+            "code": code,
+            "error": e.toString(),
+            "stackTrace": stackTrace.toString(),
+            "createdAt": DateTime.now().toIso8601String(),
+          },
+        );
+        return Response.internalServerError(
+          body: jsonEncode({
+            "isSuccess": false,
+            "message": "System Error",
+            "error": "Error Code: $code. Contact system administrator.",
+          }),
+        );
+      }
+    };
+  };
+}
+
+Middleware jsonResponseMiddleware() {
+  return (innerHandler) {
+    return (request) async {
+      final response = await innerHandler(request);
+      return response.change(headers: {'content-type': 'application/json'});
+    };
+  };
+}
+
+
+============================================================
+FILE: client\dart\client.dart
+============================================================
+
+import 'dart:convert';
+import 'dart:typed_data';
+import 'package:dio/dio.dart';
+import 'package:crypto/crypto.dart';
+import 'package:encrypt/encrypt.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
+
+class ZeytinClient {
+  String _host = "";
+  String _email = "";
+  String _password = "";
+  String _token = "";
+  String _truckId = "";
+
+  late Dio _dioInstance;
+  bool _isInitialized = false;
+
+  Dio get _dio {
+    if (!_isInitialized) {
+      _dioInstance = Dio(
+        BaseOptions(
+          baseUrl: _host,
+          connectTimeout: const Duration(seconds: 10),
+          receiveTimeout: const Duration(seconds: 5),
+        ),
+      );
+      _isInitialized = true;
+    }
+    return _dioInstance;
+  }
+
+  Future<void> init({
+    required String host,
+    required String email,
+    required String password,
+  }) async {
+    _host = host;
+    _email = email;
+    _password = password;
+    _dio.options.baseUrl = _host;
+  }
+
+  Future<ZeytinResponse> createAccount({
+    required String email,
+    required String password,
+  }) async {
+    try {
+      Response response = await _dio.post(
+        "/truck/create",
+        data: {"email": email, "password": password},
+      );
+      var responseData = response.data is String
+          ? jsonDecode(response.data)
+          : response.data;
+      return ZeytinResponse.fromMap(responseData);
+    } on DioException catch (e) {
+      return ZeytinResponse(
+        isSuccess: false,
+        message: "Opps...",
+        error: e.message,
+      );
+    }
+  }
+
+  Future<ZeytinResponse> login({
+    required String email,
+    required String password,
+  }) async {
+    try {
+      Response response = await _dio.post(
+        "/truck/id",
+        data: {"email": email, "password": password},
+      );
+      var responseData = response.data is String
+          ? jsonDecode(response.data)
+          : response.data;
+      if (responseData["isSuccess"] == true &&
+          responseData["data"] != null &&
+          responseData["data"]["id"] != null) {
+        _truckId = responseData["data"]["id"];
+        _email = email;
+        _password = password;
+      }
+      return ZeytinResponse.fromMap(responseData);
+    } on DioException catch (e) {
+      return ZeytinResponse(
+        isSuccess: false,
+        message: "Opps...",
+        error: e.message,
+      );
+    }
+  }
+
+  Future<String?> getToken() async {
+    try {
+      Response response = await _dio.post(
+        "/token/create",
+        data: {"email": _email, "password": _password},
+      );
+      var responseData = response.data is String
+          ? jsonDecode(response.data)
+          : response.data;
+      ZeytinResponse data = ZeytinResponse.fromMap(responseData);
+      if (data.isSuccess && data.data is Map && data.data!["token"] != null) {
+        _token = data.data!["token"];
+        return _token;
+      } else {
+        ZeytinPrint.errorPrint(
+          data.error ?? "There's an error message received by the client.",
+        );
+        return null;
+      }
+    } on DioException catch (e, s) {
+      ZeytinPrint.errorPrint(
+        "There's an error message received by the client: ${e.message}",
+      );
+      print(s);
+      return null;
+    }
+  }
+
+  Future<ZeytinResponse> addData({
+    required String box,
+    required String tag,
+    required Map<String, dynamic> value,
+  }) async {
+    try {
+      var tokener = ZeytinTokener(_password);
+      var encryptedData = tokener.encryptMap({
+        "box": box,
+        "tag": tag,
+        "value": value,
+      });
+      Response response = await _dio.post(
+        "/data/add",
+        data: {"token": _token, "data": encryptedData},
+      );
+      var responseData = response.data is String
+          ? jsonDecode(response.data)
+          : response.data;
+      return ZeytinResponse.fromMap(responseData);
+    } on DioException catch (e) {
+      return ZeytinResponse(
+        isSuccess: false,
+        message: "Opss...",
+        error: e.message,
+      );
+    }
+  }
+
+  Future<ZeytinResponse> getData({
+    required String box,
+    required String tag,
+  }) async {
+    try {
+      var tokener = ZeytinTokener(_password);
+      var encryptedData = tokener.encryptMap({"box": box, "tag": tag});
+      Response response = await _dio.post(
+        "/data/get",
+        data: {"token": _token, "data": encryptedData},
+      );
+      var responseData = response.data is String
+          ? jsonDecode(response.data)
+          : response.data;
+      var zResponse = ZeytinResponse.fromMap(responseData);
+      if (zResponse.isSuccess &&
+          zResponse.data != null &&
+          zResponse.data!["data"] != null) {
+        var decrypted = tokener.decryptMap(zResponse.data!["data"]);
+        return ZeytinResponse(
+          isSuccess: true,
+          message: "Oki doki!",
+          data: decrypted,
+        );
+      }
+      return zResponse;
+    } on DioException catch (e) {
+      return ZeytinResponse(
+        isSuccess: false,
+        message: "Opss...",
+        error: e.message,
+      );
+    }
+  }
+
+  Future<ZeytinResponse> deleteData({
+    required String box,
+    required String tag,
+  }) async {
+    try {
+      var tokener = ZeytinTokener(_password);
+      var encryptedData = tokener.encryptMap({"box": box, "tag": tag});
+      Response response = await _dio.post(
+        "/data/delete",
+        data: {"token": _token, "data": encryptedData},
+      );
+      var responseData = response.data is String
+          ? jsonDecode(response.data)
+          : response.data;
+      return ZeytinResponse.fromMap(responseData);
+    } on DioException catch (e) {
+      return ZeytinResponse(
+        isSuccess: false,
+        message: "Opss...",
+        error: e.message,
+      );
+    }
+  }
+
+  Future<ZeytinResponse> deleteBox({required String box}) async {
+    try {
+      var tokener = ZeytinTokener(_password);
+      var encryptedData = tokener.encryptMap({"box": box});
+      Response response = await _dio.post(
+        "/data/deleteBox",
+        data: {"token": _token, "data": encryptedData},
+      );
+      var responseData = response.data is String
+          ? jsonDecode(response.data)
+          : response.data;
+      return ZeytinResponse.fromMap(responseData);
+    } on DioException catch (e) {
+      return ZeytinResponse(
+        isSuccess: false,
+        message: "Opss...",
+        error: e.message,
+      );
+    }
+  }
+
+  Future<ZeytinResponse> addBatch({
+    required String box,
+    required Map<String, Map<String, dynamic>> entries,
+  }) async {
+    try {
+      var tokener = ZeytinTokener(_password);
+      var encryptedData = tokener.encryptMap({"box": box, "entries": entries});
+      Response response = await _dio.post(
+        "/data/addBatch",
+        data: {"token": _token, "data": encryptedData},
+      );
+      var responseData = response.data is String
+          ? jsonDecode(response.data)
+          : response.data;
+      return ZeytinResponse.fromMap(responseData);
+    } on DioException catch (e) {
+      return ZeytinResponse(
+        isSuccess: false,
+        message: "Opss...",
+        error: e.message,
+      );
+    }
+  }
+
+  Future<ZeytinResponse> getBox({required String box}) async {
+    try {
+      var tokener = ZeytinTokener(_password);
+      var encryptedData = tokener.encryptMap({"box": box});
+      Response response = await _dio.post(
+        "/data/getBox",
+        data: {"token": _token, "data": encryptedData},
+      );
+      var responseData = response.data is String
+          ? jsonDecode(response.data)
+          : response.data;
+      var zResponse = ZeytinResponse.fromMap(responseData);
+      if (zResponse.isSuccess &&
+          zResponse.data != null &&
+          zResponse.data!["data"] != null) {
+        var decrypted = tokener.decryptMap(zResponse.data!["data"]);
+        return ZeytinResponse(
+          isSuccess: true,
+          message: "Oki doki!",
+          data: decrypted,
+        );
+      }
+      return zResponse;
+    } on DioException catch (e) {
+      return ZeytinResponse(
+        isSuccess: false,
+        message: "Opss...",
+        error: e.message,
+      );
+    }
+  }
+
+  Future<ZeytinResponse> existsBox({required String box}) async {
+    try {
+      var tokener = ZeytinTokener(_password);
+      var encryptedData = tokener.encryptMap({"box": box});
+      Response response = await _dio.post(
+        "/data/existsBox",
+        data: {"token": _token, "data": encryptedData},
+      );
+      var responseData = response.data is String
+          ? jsonDecode(response.data)
+          : response.data;
+      var zResponse = ZeytinResponse.fromMap(responseData);
+      if (zResponse.isSuccess &&
+          zResponse.data != null &&
+          zResponse.data!["data"] != null) {
+        var decrypted = tokener.decryptMap(zResponse.data!["data"]);
+        return ZeytinResponse(
+          isSuccess: true,
+          message: "Oki doki!",
+          data: decrypted,
+        );
+      }
+      return zResponse;
+    } on DioException catch (e) {
+      return ZeytinResponse(
+        isSuccess: false,
+        message: "Opss...",
+        error: e.message,
+      );
+    }
+  }
+
+  Future<ZeytinResponse> existsTag({
+    required String box,
+    required String tag,
+  }) async {
+    try {
+      var tokener = ZeytinTokener(_password);
+      var encryptedData = tokener.encryptMap({"box": box, "tag": tag});
+      Response response = await _dio.post(
+        "/data/existsTag",
+        data: {"token": _token, "data": encryptedData},
+      );
+      var responseData = response.data is String
+          ? jsonDecode(response.data)
+          : response.data;
+      var zResponse = ZeytinResponse.fromMap(responseData);
+      if (zResponse.isSuccess &&
+          zResponse.data != null &&
+          zResponse.data!["data"] != null) {
+        var decrypted = tokener.decryptMap(zResponse.data!["data"]);
+        return ZeytinResponse(
+          isSuccess: true,
+          message: "Oki doki!",
+          data: decrypted,
+        );
+      }
+      return zResponse;
+    } on DioException catch (e) {
+      return ZeytinResponse(
+        isSuccess: false,
+        message: "Opss...",
+        error: e.message,
+      );
+    }
+  }
+
+  Future<ZeytinResponse> contains({
+    required String box,
+    required String tag,
+  }) async {
+    try {
+      var tokener = ZeytinTokener(_password);
+      var encryptedData = tokener.encryptMap({"box": box, "tag": tag});
+      Response response = await _dio.post(
+        "/data/contains",
+        data: {"token": _token, "data": encryptedData},
+      );
+      var responseData = response.data is String
+          ? jsonDecode(response.data)
+          : response.data;
+      var zResponse = ZeytinResponse.fromMap(responseData);
+      if (zResponse.isSuccess &&
+          zResponse.data != null &&
+          zResponse.data!["data"] != null) {
+        var decrypted = tokener.decryptMap(zResponse.data!["data"]);
+        return ZeytinResponse(
+          isSuccess: true,
+          message: "Oki doki!",
+          data: decrypted,
+        );
+      }
+      return zResponse;
+    } on DioException catch (e) {
+      return ZeytinResponse(
+        isSuccess: false,
+        message: "Opss...",
+        error: e.message,
+      );
+    }
+  }
+
+  Future<ZeytinResponse> search({
+    required String box,
+    required String field,
+    required String prefix,
+  }) async {
+    try {
+      var tokener = ZeytinTokener(_password);
+      var encryptedData = tokener.encryptMap({
+        "box": box,
+        "field": field,
+        "prefix": prefix,
+      });
+      Response response = await _dio.post(
+        "/data/search",
+        data: {"token": _token, "data": encryptedData},
+      );
+      var responseData = response.data is String
+          ? jsonDecode(response.data)
+          : response.data;
+      var zResponse = ZeytinResponse.fromMap(responseData);
+      if (zResponse.isSuccess &&
+          zResponse.data != null &&
+          zResponse.data!["data"] != null) {
+        var decrypted = tokener.decryptMap(zResponse.data!["data"]);
+        return ZeytinResponse(
+          isSuccess: true,
+          message: "Oki doki!",
+          data: decrypted,
+        );
+      }
+      return zResponse;
+    } on DioException catch (e) {
+      return ZeytinResponse(
+        isSuccess: false,
+        message: "Opss...",
+        error: e.message,
+      );
+    }
+  }
+
+  Future<ZeytinResponse> filter({
+    required String box,
+    required String field,
+    required String value,
+  }) async {
+    try {
+      var tokener = ZeytinTokener(_password);
+      var encryptedData = tokener.encryptMap({
+        "box": box,
+        "field": field,
+        "value": value,
+      });
+      Response response = await _dio.post(
+        "/data/filter",
+        data: {"token": _token, "data": encryptedData},
+      );
+      var responseData = response.data is String
+          ? jsonDecode(response.data)
+          : response.data;
+      var zResponse = ZeytinResponse.fromMap(responseData);
+      if (zResponse.isSuccess &&
+          zResponse.data != null &&
+          zResponse.data!["data"] != null) {
+        var decrypted = tokener.decryptMap(zResponse.data!["data"]);
+        return ZeytinResponse(
+          isSuccess: true,
+          message: "Oki doki!",
+          data: decrypted,
+        );
+      }
+      return zResponse;
+    } on DioException catch (e) {
+      return ZeytinResponse(
+        isSuccess: false,
+        message: "Opss...",
+        error: e.message,
+      );
+    }
+  }
+
+  Future<ZeytinResponse> uploadFile(String filePath, String fileName) async {
+    try {
+      var formData = FormData.fromMap({
+        "token": _token,
+        "file": await MultipartFile.fromFile(filePath, filename: fileName),
+      });
+      Response response = await _dio.post("/storage/upload", data: formData);
+      var responseData = response.data is String
+          ? jsonDecode(response.data)
+          : response.data;
+      return ZeytinResponse.fromMap(responseData);
+    } on DioException catch (e) {
+      return ZeytinResponse(
+        isSuccess: false,
+        message: "Opss...",
+        error: e.message,
+      );
+    }
+  }
+
+  Future<Uint8List?> downloadFile(String fileName) async {
+    try {
+      Response response = await _dio.get(
+        "/$_truckId/$fileName",
+        options: Options(responseType: ResponseType.bytes),
+      );
+      return response.data as Uint8List;
+    } on DioException catch (e) {
+      ZeytinPrint.errorPrint(
+        "There's an error message received by the client: ${e.message}",
+      );
+      return null;
+    }
+  }
+
+  Future<ZeytinResponse> deleteToken({
+    required String email,
+    required String password,
+  }) async {
+    try {
+      Response response = await _dio.delete(
+        "/token/delete",
+        data: {"email": email, "password": password},
+      );
+      var responseData = response.data is String
+          ? jsonDecode(response.data)
+          : response.data;
+      return ZeytinResponse.fromMap(responseData);
+    } on DioException catch (e) {
+      return ZeytinResponse(
+        isSuccess: false,
+        message: "Opss...",
+        error: e.message,
+      );
+    }
+  }
+
+  Stream<Map<String, dynamic>> watchBox({required String box}) {
+    var wsUrl = "${_host.replaceFirst("http", "ws")}/data/watch/$_token/$box";
+    var channel = WebSocketChannel.connect(Uri.parse(wsUrl));
+    var tokener = ZeytinTokener(_password);
+
+    return channel.stream.map((message) {
+      var decoded = jsonDecode(message);
+      if (decoded["data"] != null) {
+        decoded["data"] = tokener.decryptMap(decoded["data"]);
+      }
+      if (decoded["entries"] != null) {
+        decoded["entries"] = tokener.decryptMap(decoded["entries"]);
+      }
+      return decoded as Map<String, dynamic>;
+    });
+  }
+}
+
+class ZeytinTokener {
+  final Key key;
+  final Encrypter encrypter;
+
+  ZeytinTokener(String passphrase)
+    : key = _deriveKey(passphrase),
+      encrypter = Encrypter(AES(_deriveKey(passphrase), mode: AESMode.cbc));
+
+  static Key _deriveKey(String passphrase) {
+    final bytes = utf8.encode(passphrase);
+    final hash = sha256.convert(bytes).bytes;
+    return Key(Uint8List.fromList(hash));
+  }
+
+  String encryptMap(Map<String, dynamic> data) {
+    final iv = IV.fromSecureRandom(16);
+    final plainText = jsonEncode(data);
+    final encrypted = encrypter.encrypt(plainText, iv: iv);
+    return "${iv.base64}:${encrypted.base64}";
+  }
+
+  Map<String, dynamic> decryptMap(String encryptedData) {
+    final parts = encryptedData.split(':');
+    if (parts.length != 2) {
+      throw FormatException("Invalid encrypted data format");
+    }
+    final iv = IV.fromBase64(parts[0]);
+    final cipherText = parts[1];
+    final decrypted = encrypter.decrypt(
+      Encrypted.fromBase64(cipherText),
+      iv: iv,
+    );
+    return jsonDecode(decrypted) as Map<String, dynamic>;
+  }
+}
+
+class ZeytinResponse {
+  final bool isSuccess;
+  final String message;
+  final String? error;
+  final Map<String, dynamic>? data;
+
+  ZeytinResponse({
+    required this.isSuccess,
+    required this.message,
+    this.error,
+    this.data,
+  });
+
+  factory ZeytinResponse.fromMap(Map<String, dynamic> map) {
+    return ZeytinResponse(
+      isSuccess: map['isSuccess'] ?? false,
+      message: map['message'] ?? '',
+      error: map['error'],
+      data: map['data'] != null ? Map<String, dynamic>.from(map['data']) : null,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      "isSuccess": isSuccess,
+      "message": message,
+      if (error != null) "error": error,
+      if (data != null) "data": data,
+    };
+  }
+}
+
+class ZeytinPrint {
+  static void successPrint(String data) {
+    print('\x1B[32m[✅]: $data\x1B[0m');
+  }
+
+  static void errorPrint(String data) {
+    print('\x1B[31m[❌]: $data\x1B[0m');
+  }
+
+  void warningPrint(String data) {
+    print('\x1B[33m[❗]: $data\x1B[0m');
+  }
+}
+
+
+============================================================
+FILE: lib\config.dart
+============================================================
+
+class ZeytinConfig {
+  static const int maxTruckCount = 20;
+  static const int maxTruckPerIp = 20;
+  static const int truckCreationCooldownMs = 600000;
+  static const int globalDosThreshold = 50000;
+  static const int dosCooldownMs = 300000;
+  static const int ipRateLimitMs = 1000; 
+  static const int generalIpRateLimit5Sec = 100;
+  static bool sleepModeEnabled = true;
+  static List<String> blackList = [];
+  static List<String> whiteList = ["127.0.0.1"];
+}
+
+============================================================
+FILE: lib\logic\account.dart
+============================================================
+
+import 'dart:convert';
+import 'dart:io';
+import 'package:crypto/crypto.dart';
+import 'package:uuid/uuid.dart';
+import 'package:zeytin/logic/engine.dart';
+import 'package:zeytin/models/response.dart';
+
+class ZeytinAccounts {
+  static String _generateHash(String password, String salt) {
+    final bytes = utf8.encode(password + salt);
+    return sha256.convert(bytes).toString();
+  }
+
+  static Future<bool> isEmailRegistered(Zeytin zeytin, String email) async {
+    final results = await zeytin.filter(
+      "system",
+      "trucks",
+      (data) => data["email"] == email,
+    );
+    return results.isNotEmpty;
+  }
+
+  static Future<ZeytinResponse> createAccount(
+    Zeytin zeytin,
+    String email,
+    String password,
+  ) async {
+    
+    if (await isEmailRegistered(zeytin, email)) {
+      return ZeytinResponse(
+        isSuccess: false,
+        message: "Opss...",
+        error: "This email has been used before.",
+      );
+    }
+
+    String truckID = const Uuid().v1();
+    String hashedPassword = _generateHash(password, truckID);
+
+    await zeytin.put(
+      truckId: "system",
+      boxId: "trucks",
+      tag: truckID,
+      value: {
+        "email": email,
+        "password": hashedPassword,
+        "id": truckID,
+        "createdAt": DateTime.now().toIso8601String(),
+      },
+    );
+    await Directory(
+      "${zeytin.rootPath}/$truckID/storage",
+    ).create(recursive: true);
+    await zeytin.createTruck(truckId: truckID);
+    return ZeytinResponse(
+      isSuccess: true,
+      message: "Oki doki!",
+      data: {"id": truckID},
+    );
+  }
+
+  static Future<ZeytinResponse> login(
+    Zeytin zeytin,
+    String email,
+    String password,
+  ) async {
+    final results = await zeytin.filter(
+      "system",
+      "trucks",
+      (data) => data["email"] == email,
+    );
+
+    if (results.isNotEmpty) {
+      String truckID = results.first["id"];
+      String storedHash = results.first["password"];
+      String loginHash = _generateHash(password, truckID);
+
+      if (storedHash == loginHash) {
+        return ZeytinResponse(
+          isSuccess: true,
+          message: "Oki doki!",
+          data: {"id": truckID},
+        );
+      }
+    }
+    return ZeytinResponse(
+      isSuccess: false,
+      message: "Opss...",
+      error: "The email or password doesn't match.",
+    );
+  }
+}
+
+
+============================================================
+FILE: lib\logic\engine.dart
+============================================================
+
+import 'dart:io';
+import 'dart:convert';
+import 'dart:typed_data';
+import 'dart:async';
+import 'dart:isolate';
+
+class LRUCache<K, V> {
+  final int maxSize;
+  final Map<K, _Node<V>> _map = {};
+  _Node<V>? _head;
+  _Node<V>? _tail;
+  int _size = 0;
+
+  LRUCache(this.maxSize);
+
+  V? get(K key) {
+    final node = _map[key];
+    if (node == null) return null;
+    _moveToHead(node);
+    return node.value;
+  }
+
+  void put(K key, V value) {
+    if (_map.containsKey(key)) {
+      final node = _map[key]!;
+      node.value = value;
+      _moveToHead(node);
+    } else {
+      final node = _Node<V>(key, value);
+      _map[key] = node;
+      _addToHead(node);
+      _size++;
+      if (_size > maxSize) {
+        _removeTail();
+      }
+    }
+  }
+
+  bool contains(K key) => _map.containsKey(key);
+
+  void remove(K key) {
+    final node = _map[key];
+    if (node != null) {
+      _removeNode(node);
+      _map.remove(key);
+      _size--;
+    }
+  }
+
+  void clear() {
+    _map.clear();
+    _head = _tail = null;
+    _size = 0;
+  }
+
+  void _moveToHead(_Node<V> node) {
+    if (node == _head) return;
+    _removeNode(node);
+    _addToHead(node);
+  }
+
+  void _addToHead(_Node<V> node) {
+    node.prev = null;
+    node.next = _head;
+    if (_head != null) _head!.prev = node;
+    _head = node;
+    _tail ??= node;
+  }
+
+  void _removeNode(_Node<V> node) {
+    if (node.prev != null) {
+      node.prev!.next = node.next;
+    } else {
+      _head = node.next;
+    }
+    if (node.next != null) {
+      node.next!.prev = node.prev;
+    } else {
+      _tail = node.prev;
+    }
+    node.prev = null;
+    node.next = null;
+  }
+
+  void _removeTail() {
+    if (_tail != null) {
+      final key = _tail!.key;
+      _removeNode(_tail!);
+      _map.remove(key);
+      _size--;
+    }
+  }
+}
+
+class _Node<V> {
+  final dynamic key;
+  V value;
+  _Node<V>? prev;
+  _Node<V>? next;
+  _Node(this.key, this.value);
+}
+
+class BinaryEncoder {
+  static const int typeNULL = 0;
+  static const int typeBOOL = 1;
+  static const int typeINT = 2;
+  static const int typeDOUBLE = 3;
+  static const int typeSTRING = 4;
+  static const int typeLIST = 5;
+  static const int typeMAP = 6;
+  static const int magicByte = 0xDB;
+
+  static Uint8List encode(String boxId, String tag, Map<String, dynamic> data) {
+    final builder = BytesBuilder();
+    builder.addByte(magicByte);
+    final boxBytes = utf8.encode(boxId);
+    _encodeRawLength(builder, boxBytes.length);
+    builder.add(boxBytes);
+    final tagBytes = utf8.encode(tag);
+    _encodeRawLength(builder, tagBytes.length);
+    builder.add(tagBytes);
+    final dataBytes = _encodeMap(data);
+    _encodeRawLength(builder, dataBytes.length);
+    builder.add(dataBytes);
+    return builder.toBytes();
+  }
+
+  static Uint8List _encodeMap(Map<String, dynamic> data) {
+    final builder = BytesBuilder();
+    _encodeValue(builder, data);
+    return builder.toBytes();
+  }
+
+  static Map<String, dynamic> decodeValue(Uint8List bytes) {
+    final reader = ByteData.view(bytes.buffer);
+    return _decodeValue(reader, 0).value as Map<String, dynamic>;
+  }
+
+  static void _encodeValue(BytesBuilder builder, dynamic value) {
+    if (value == null) {
+      builder.addByte(typeNULL);
+    } else if (value is bool) {
+      builder.addByte(typeBOOL);
+      builder.addByte(value ? 1 : 0);
+    } else if (value is int) {
+      builder.addByte(typeINT);
+      final bytes = ByteData(8);
+      bytes.setInt64(0, value, Endian.little);
+      builder.add(bytes.buffer.asUint8List());
+    } else if (value is double) {
+      builder.addByte(typeDOUBLE);
+      final bytes = ByteData(8);
+      bytes.setFloat64(0, value, Endian.little);
+      builder.add(bytes.buffer.asUint8List());
+    } else if (value is String) {
+      builder.addByte(typeSTRING);
+      final utf8Bytes = utf8.encode(value);
+      _encodeRawLength(builder, utf8Bytes.length);
+      builder.add(utf8Bytes);
+    } else if (value is List) {
+      builder.addByte(typeLIST);
+      _encodeRawLength(builder, value.length);
+      for (var item in value) {
+        _encodeValue(builder, item);
+      }
+    } else if (value is Map<String, dynamic>) {
+      builder.addByte(typeMAP);
+      _encodeRawLength(builder, value.length);
+      for (var entry in value.entries) {
+        _encodeValue(builder, entry.key);
+        _encodeValue(builder, entry.value);
+      }
+    } else {
+      throw ArgumentError('Unsupported type: ${value.runtimeType}');
+    }
+  }
+
+  static MapEntry<int, dynamic> _decodeValue(ByteData reader, int offset) {
+    final type = reader.getUint8(offset++);
+    switch (type) {
+      case typeNULL:
+        return MapEntry(offset, null);
+      case typeBOOL:
+        return MapEntry(offset + 1, reader.getUint8(offset) == 1);
+      case typeINT:
+        return MapEntry(offset + 8, reader.getInt64(offset, Endian.little));
+      case typeDOUBLE:
+        return MapEntry(offset + 8, reader.getFloat64(offset, Endian.little));
+      case typeSTRING:
+        final len = reader.getUint32(offset, Endian.little);
+        offset += 4;
+        final val = utf8.decode(
+          Uint8List.view(reader.buffer, reader.offsetInBytes + offset, len),
+        );
+        return MapEntry(offset + len, val);
+      case typeLIST:
+        final len = reader.getUint32(offset, Endian.little);
+        offset += 4;
+        final list = [];
+        for (var i = 0; i < len; i++) {
+          final res = _decodeValue(reader, offset);
+          offset = res.key;
+          list.add(res.value);
+        }
+        return MapEntry(offset, list);
+      case typeMAP:
+        final len = reader.getUint32(offset, Endian.little);
+        offset += 4;
+        final map = <String, dynamic>{};
+        for (var i = 0; i < len; i++) {
+          final kRes = _decodeValue(reader, offset);
+          final vRes = _decodeValue(reader, kRes.key);
+          offset = vRes.key;
+          map[kRes.value as String] = vRes.value;
+        }
+        return MapEntry(offset, map);
+      default:
+        throw FormatException('Unknown type: $type');
+    }
+  }
+
+  static void _encodeRawLength(BytesBuilder builder, int length) {
+    final bytes = ByteData(4);
+    bytes.setUint32(0, length, Endian.little);
+    builder.add(bytes.buffer.asUint8List());
+  }
+}
+
+class PersistentIndex {
+  final File _file;
+  Map<String, Map<String, List<int>>> _index = {};
+
+  PersistentIndex(String path) : _file = File(path);
+
+  Future<void> load() async {
+    if (await _file.exists()) {
+      final bytes = await _file.readAsBytes();
+      if (bytes.isNotEmpty) _index = _deserializeIndex(bytes);
+    }
+  }
+
+  Future<void> save() async {
+    final bytes = _serializeIndex(_index);
+    await _file.writeAsBytes(bytes);
+  }
+
+  void update(String boxId, String tag, int offset, int length) {
+    _index[boxId] ??= {};
+    _index[boxId]![tag] = [offset, length];
+  }
+
+  List<int>? get(String boxId, String tag) => _index[boxId]?[tag];
+  Map<String, List<int>>? getBox(String boxId) => _index[boxId];
+
+  int getLastOffset() {
+    int maxOffset = 0;
+    for (var box in _index.values) {
+      for (var addr in box.values) {
+        if (addr[0] + addr[1] > maxOffset) maxOffset = addr[0] + addr[1];
+      }
+    }
+    return maxOffset;
+  }
+
+  Uint8List _serializeIndex(Map<String, Map<String, List<int>>> index) {
+    final builder = BytesBuilder();
+    final boxIds = index.keys.toList();
+    final bCount = ByteData(4)..setUint32(0, boxIds.length, Endian.little);
+    builder.add(bCount.buffer.asUint8List());
+    for (var bId in boxIds) {
+      final bBytes = utf8.encode(bId);
+      builder.add(
+        (ByteData(
+          4,
+        )..setUint32(0, bBytes.length, Endian.little)).buffer.asUint8List(),
+      );
+      builder.add(bBytes);
+      final tags = index[bId]!;
+      builder.add(
+        (ByteData(
+          4,
+        )..setUint32(0, tags.length, Endian.little)).buffer.asUint8List(),
+      );
+      for (var entry in tags.entries) {
+        final tBytes = utf8.encode(entry.key);
+        builder.add(
+          (ByteData(
+            4,
+          )..setUint32(0, tBytes.length, Endian.little)).buffer.asUint8List(),
+        );
+        builder.add(tBytes);
+        final addr = ByteData(8);
+        addr.setUint32(0, entry.value[0], Endian.little);
+        addr.setUint32(4, entry.value[1], Endian.little);
+        builder.add(addr.buffer.asUint8List());
+      }
+    }
+    return builder.toBytes();
+  }
+
+  Map<String, Map<String, List<int>>> _deserializeIndex(Uint8List bytes) {
+    final res = <String, Map<String, List<int>>>{};
+    final reader = ByteData.view(bytes.buffer);
+    int offset = 0;
+    if (bytes.length < 4) return res;
+    final bCount = reader.getUint32(offset, Endian.little);
+    offset += 4;
+    for (var i = 0; i < bCount; i++) {
+      final bLen = reader.getUint32(offset, Endian.little);
+      offset += 4;
+      final bId = utf8.decode(
+        Uint8List.view(reader.buffer, reader.offsetInBytes + offset, bLen),
+      );
+      offset += bLen;
+      final tCount = reader.getUint32(offset, Endian.little);
+      offset += 4;
+      final bMap = <String, List<int>>{};
+      for (var j = 0; j < tCount; j++) {
+        final tLen = reader.getUint32(offset, Endian.little);
+        offset += 4;
+        final t = utf8.decode(
+          Uint8List.view(reader.buffer, reader.offsetInBytes + offset, tLen),
+        );
+        offset += tLen;
+        final aOff = reader.getUint32(offset, Endian.little);
+        offset += 4;
+        final aLen = reader.getUint32(offset, Endian.little);
+        offset += 4;
+        bMap[t] = [aOff, aLen];
+      }
+      res[bId] = bMap;
+    }
+    return res;
+  }
+}
+
+class Truck {
+  final String id;
+  final String path;
+  final PersistentIndex _index;
+  final LRUCache<String, Map<String, dynamic>> _cache;
+  final Map<String, Map<String, dynamic>> _hotCache = {};
+  final Map<String, Map<String, Map<String, Set<String>>>> _fieldIndex = {};
+  int _compactCounter = 0;
+  final int _compactThreshold = 500;
+  bool _isCompacting = false;
+  RandomAccessFile? _reader;
+  RandomAccessFile? _writer;
+  Future<void> _lock = Future.value();
+  int _dirtyCount = 0;
+  final int _saveThreshold = 500;
+  bool _isSavingIndex = false;
+
+  Truck(this.id, this.path)
+    : _index = PersistentIndex('$path/$id.idx'),
+      _cache = LRUCache(10000);
+
+  File get _dataFile => File('$path/$id.dat');
+
+  Future<void> initialize() async {
+    await _index.load();
+    if (await _dataFile.exists()) {
+      await _repair();
+      _writer = await _dataFile.open(mode: FileMode.append);
+      await _rebuildSearchIndex();
+    }
+  }
+
+  Future<T> _synchronized<T>(Future<T> Function() action) async {
+    await _lock;
+    final completer = Completer<T>();
+    // ignore: body_might_complete_normally_catch_error
+    _lock = completer.future.catchError((_) {});
+    try {
+      final result = await action();
+      completer.complete(result);
+      return result;
+    } catch (e) {
+      completer.completeError(e);
+      rethrow;
+    }
+  }
+
+  Future<void> _rebuildSearchIndex() async {
+    final boxes = _index._index.keys;
+    for (var bId in boxes) {
+      final boxData = _index.getBox(bId);
+      if (boxData == null) continue;
+      for (var tag in boxData.keys) {
+        final data = await read(bId, tag);
+        if (data != null) {
+          _updateInternalIndex(bId, tag, data);
+        }
+      }
+    }
+  }
+
+  void _updateInternalIndex(String bId, String tag, Map<String, dynamic> data) {
+    data.forEach((field, value) {
+      if (value is String) {
+        _fieldIndex[bId] ??= {};
+        _fieldIndex[bId]![field] ??= {};
+        _fieldIndex[bId]![field]![value] ??= {};
+        _fieldIndex[bId]![field]![value]!.add(tag);
+      }
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> queryAdvanced({
+    required String bId,
+    bool Function(Map<String, dynamic>)? filter,
+  }) async {
+    final List<Map<String, dynamic>> results = [];
+    final boxData = _index.getBox(bId);
+    if (boxData == null) return results;
+    for (var tag in boxData.keys) {
+      final data = await read(bId, tag);
+      if (data != null) {
+        if (filter == null || filter(data)) {
+          results.add(data);
+        }
+      }
+    }
+    return results;
+  }
+
+  Future<List<Map<String, dynamic>>> query(
+    String bId,
+    String field,
+    String prefix,
+  ) async {
+    final List<Map<String, dynamic>> results = [];
+    final boxIdx = _fieldIndex[bId];
+    if (boxIdx == null) return results;
+    final fieldIdx = boxIdx[field];
+    if (fieldIdx == null) return results;
+    for (var entry in fieldIdx.entries) {
+      if (entry.key.startsWith(prefix)) {
+        for (var tag in entry.value) {
+          final data = await read(bId, tag);
+          if (data != null) results.add(data);
+        }
+      }
+    }
+    return results;
+  }
+
+  Future<void> _repair() async {
+    final int last = _index.getLastOffset();
+    final int actual = await _dataFile.length();
+    if (actual > last) {
+      final raf = await _dataFile.open(mode: FileMode.read);
+      await raf.setPosition(last);
+      int pos = last;
+      while (pos < actual) {
+        try {
+          final magic = await raf.readByte();
+          if (magic != BinaryEncoder.magicByte) break;
+          final bLenBytes = await raf.read(4);
+          final bLen = ByteData.view(
+            bLenBytes.buffer,
+          ).getUint32(0, Endian.little);
+          final boxIdBytes = await raf.read(bLen);
+          final boxId = utf8.decode(boxIdBytes);
+          final tLenBytes = await raf.read(4);
+          final tLen = ByteData.view(
+            tLenBytes.buffer,
+          ).getUint32(0, Endian.little);
+          final tagBytes = await raf.read(tLen);
+          final tag = utf8.decode(tagBytes);
+          final dLenBytes = await raf.read(4);
+          final dLen = ByteData.view(
+            dLenBytes.buffer,
+          ).getUint32(0, Endian.little);
+          final dataBytes = await raf.read(dLen);
+          final data = BinaryEncoder.decodeValue(dataBytes);
+          final total = (await raf.position()) - pos;
+          _index.update(boxId, tag, pos, total);
+          _updateInternalIndex(boxId, tag, data);
+          pos = await raf.position();
+        } catch (_) {
+          break;
+        }
+      }
+      await raf.close();
+      await _index.save();
+    }
+  }
+
+  Future<void> write(String bId, String t, Map<String, dynamic> v) {
+    return _synchronized(() async {
+      _writer ??= await _dataFile.open(mode: FileMode.append);
+      final off = await _writer!.length();
+      final bytes = BinaryEncoder.encode(bId, t, v);
+      await _writer!.writeFrom(bytes);
+      await _writer!.flush();
+      _index.update(bId, t, off, bytes.length);
+      _updateInternalIndex(bId, t, v);
+      _dirtyCount++;
+      _compactCounter++;
+      if (_dirtyCount >= _saveThreshold && !_isSavingIndex) _autoSave();
+      if (_compactCounter >= _compactThreshold && !_isCompacting) {
+        _runAutoCompact();
+      }
+      final key = '$bId:$t';
+      _cache.put(key, v);
+      _updateHot(key, v);
+    });
+  }
+
+  Future<void> batch(String bId, Map<String, Map<String, dynamic>> entries) {
+    return _synchronized(() async {
+      _writer ??= await _dataFile.open(mode: FileMode.append);
+      var off = await _writer!.length();
+      for (var entry in entries.entries) {
+        final bytes = BinaryEncoder.encode(bId, entry.key, entry.value);
+        await _writer!.writeFrom(bytes);
+        _index.update(bId, entry.key, off, bytes.length);
+        _updateInternalIndex(bId, entry.key, entry.value);
+        final key = '$bId:${entry.key}';
+        _cache.put(key, entry.value);
+        _updateHot(key, entry.value);
+        off += bytes.length;
+        _dirtyCount++;
+        _compactCounter++;
+      }
+      await _writer!.flush();
+      if (_dirtyCount >= _saveThreshold && !_isSavingIndex) _autoSave();
+      if (_compactCounter >= _compactThreshold && !_isCompacting) {
+        _runAutoCompact();
+      }
+    });
+  }
+
+  void _runAutoCompact() {
+    _isCompacting = true;
+    _compactCounter = 0;
+    compact()
+        .then((_) {
+          _isCompacting = false;
+        })
+        .catchError((e) {
+          _isCompacting = false;
+        });
+  }
+
+  void _autoSave() {
+    _isSavingIndex = true;
+    _dirtyCount = 0;
+    // ignore: body_might_complete_normally_catch_error
+    _index.save().then((_) => _isSavingIndex = false).catchError((_) {
+      _isSavingIndex = false;
+    });
+  }
+
+  Future<Map<String, dynamic>?> read(String bId, String t) {
+    return _synchronized(() async {
+      final key = '$bId:$t';
+      if (_hotCache.containsKey(key)) return _hotCache[key];
+      final c = _cache.get(key);
+      if (c != null) {
+        _updateHot(key, c);
+        return c;
+      }
+      final addr = _index.get(bId, t);
+      if (addr == null) return null;
+      _reader ??= await _dataFile.open(mode: FileMode.read);
+      await _reader!.setPosition(addr[0]);
+      final block = await _reader!.read(addr[1]);
+      final blockReader = ByteData.view(block.buffer);
+      int offset = 1;
+      final boxIdLen = blockReader.getUint32(offset, Endian.little);
+      offset += 4 + boxIdLen;
+      final tagLen = blockReader.getUint32(offset, Endian.little);
+      offset += 4 + tagLen;
+      final dataLen = blockReader.getUint32(offset, Endian.little);
+      offset += 4;
+      final dataBytes = block.sublist(offset, offset + dataLen);
+      try {
+        final data = BinaryEncoder.decodeValue(dataBytes);
+        _cache.put(key, data);
+        _updateHot(key, data);
+        return data;
+      } catch (e) {
+        return null;
+      }
+    });
+  }
+
+  Future<Map<String, Map<String, dynamic>>> readBox(String bId) async {
+    final res = <String, Map<String, dynamic>>{};
+    final box = _index.getBox(bId);
+    if (box == null) return res;
+    for (var t in box.keys) {
+      final d = await read(bId, t);
+      if (d != null) res[t] = d;
+    }
+    return res;
+  }
+
+  void _updateHot(String k, Map<String, dynamic> v) {
+    if (_hotCache.length >= 100) _hotCache.remove(_hotCache.keys.first);
+    _hotCache[k] = v;
+  }
+
+  Future<void> compact() {
+    return _synchronized(() async {
+      final tempFile = File('$path/${id}_temp.dat');
+      final IOSink sink = tempFile.openWrite();
+      final newIndex = PersistentIndex('$path/${id}_temp.idx');
+      int currentOffset = 0;
+      final boxes = _index._index.keys.toList();
+      for (var bId in boxes) {
+        final tags = _index._index[bId]?.keys.toList() ?? [];
+        for (var tag in tags) {
+          final data = await read(bId, tag);
+          if (data != null) {
+            final bytes = BinaryEncoder.encode(bId, tag, data);
+            sink.add(bytes);
+            newIndex.update(bId, tag, currentOffset, bytes.length);
+            currentOffset += bytes.length;
+          }
+        }
+      }
+      await sink.flush();
+      await sink.close();
+      await _reader?.close();
+      await _writer?.close();
+      _reader = null;
+      _writer = null;
+      final oldDataFile = _dataFile;
+      final oldIdxFile = File(_index._file.path);
+      if (await oldDataFile.exists()) await oldDataFile.delete();
+      if (await oldIdxFile.exists()) await oldIdxFile.delete();
+      await tempFile.rename(oldDataFile.path);
+      await File(newIndex._file.path).rename(oldIdxFile.path);
+      _index._index = newIndex._index;
+      await _index.save();
+      _writer = await _dataFile.open(mode: FileMode.append);
+    });
+  }
+
+  Future<void> close() async {
+    await _index.save();
+    await _reader?.close();
+    await _writer?.close();
+  }
+}
+
+class TruckIsolate {
+  late Truck _truck;
+
+  Future<void> init(String id, String path) async {
+    _truck = Truck(id, path);
+    await _truck.initialize();
+  }
+
+  Future<void> write(
+    String boxId,
+    String tag,
+    Map<String, dynamic> value,
+  ) async {
+    await _truck.write(boxId, tag, value);
+  }
+
+  Future<Map<String, dynamic>?> read(String boxId, String tag) async {
+    return await _truck.read(boxId, tag);
+  }
+
+  Future<void> batch(
+    String boxId,
+    Map<String, Map<String, dynamic>> entries,
+  ) async {
+    await _truck.batch(boxId, entries);
+  }
+
+  Future<Map<String, Map<String, dynamic>>> readBox(String boxId) async {
+    return await _truck.readBox(boxId);
+  }
+
+  Future<List<Map<String, dynamic>>> query(
+    String boxId,
+    String field,
+    String prefix,
+  ) async {
+    return await _truck.query(boxId, field, prefix);
+  }
+
+  Future<List<Map<String, dynamic>>> queryAdvanced({
+    required String boxId,
+    bool Function(Map<String, dynamic>)? filter,
+  }) async {
+    return await _truck.queryAdvanced(bId: boxId, filter: filter);
+  }
+
+  Future<void> compact() async {
+    await _truck.compact();
+  }
+
+  Future<void> close() async {
+    await _truck.close();
+  }
+
+  Future<bool> contains(String boxId, String tag) async {
+    return await _truck.read(boxId, tag) != null;
+  }
+}
+
+class TruckProxy {
+  final String id;
+  final String path;
+  late SendPort _sendPort;
+  final Map<int, Completer<dynamic>> _completers = {};
+  int _messageId = 0;
+  final ReceivePort _receivePort = ReceivePort();
+
+  TruckProxy(this.id, this.path);
+
+  Future<void> initialize() async {
+    await Isolate.spawn(_startTruckIsolate, _receivePort.sendPort);
+    final completer = Completer<void>();
+    _receivePort.listen((message) {
+      if (message is SendPort) {
+        _sendPort = message;
+        _sendCommand('init', {'id': id, 'path': path}).then((_) {
+          completer.complete();
+        });
+      } else if (message is Map) {
+        final id = message['id'] as int;
+        final completer = _completers[id];
+        if (completer != null) {
+          if (message.containsKey('result')) {
+            completer.complete(message['result']);
+          } else if (message.containsKey('error')) {
+            completer.completeError(Exception(message['error']));
+          }
+          _completers.remove(id);
+        }
+      }
+    });
+    await completer.future;
+  }
+
+  static void _startTruckIsolate(SendPort sendPort) {
+    final receivePort = ReceivePort();
+    sendPort.send(receivePort.sendPort);
+    final truckIsolate = TruckIsolate();
+    receivePort.listen((message) async {
+      if (message is Map) {
+        final command = message['command'] as String;
+        final params = message['params'] as Map<String, dynamic>;
+        final id = message['id'] as int;
+        try {
+          dynamic result;
+          switch (command) {
+            case 'init':
+              await truckIsolate.init(
+                params['id'] as String,
+                params['path'] as String,
+              );
+              result = null;
+              break;
+            case 'write':
+              await truckIsolate.write(
+                params['boxId'] as String,
+                params['tag'] as String,
+                params['value'] as Map<String, dynamic>,
+              );
+              result = null;
+              break;
+            case 'read':
+              result = await truckIsolate.read(
+                params['boxId'] as String,
+                params['tag'] as String,
+              );
+              break;
+            case 'batch':
+              await truckIsolate.batch(
+                params['boxId'] as String,
+                params['entries'] as Map<String, Map<String, dynamic>>,
+              );
+              result = null;
+              break;
+            case 'readBox':
+              result = await truckIsolate.readBox(params['boxId'] as String);
+              break;
+            case 'query':
+              result = await truckIsolate.query(
+                params['boxId'] as String,
+                params['field'] as String,
+                params['prefix'] as String,
+              );
+              break;
+            case 'queryAdvanced':
+              result = await truckIsolate.queryAdvanced(
+                boxId: params['boxId'] as String,
+                filter:
+                    params['filter'] as bool Function(Map<String, dynamic>)?,
+              );
+              break;
+            case 'compact':
+              await truckIsolate.compact();
+              result = null;
+              break;
+            case 'close':
+              await truckIsolate.close();
+              result = null;
+              break;
+            case 'contains':
+              result = await truckIsolate.contains(
+                params['boxId'] as String,
+                params['tag'] as String,
+              );
+              break;
+            default:
+              throw Exception('Unknown command: $command');
+          }
+          sendPort.send({'id': id, 'result': result});
+        } catch (e) {
+          sendPort.send({'id': id, 'error': e.toString()});
+        }
+      }
+    });
+  }
+
+  Future<dynamic> _sendCommand(String command, Map<String, dynamic> params) {
+    final id = _messageId++;
+    final completer = Completer<dynamic>();
+    _completers[id] = completer;
+    _sendPort.send({'command': command, 'params': params, 'id': id});
+    return completer.future;
+  }
+
+  Future<void> write(
+    String boxId,
+    String tag,
+    Map<String, dynamic> value,
+  ) async {
+    return await _sendCommand('write', {
+      'boxId': boxId,
+      'tag': tag,
+      'value': value,
+    });
+  }
+
+  Future<Map<String, dynamic>?> read(String boxId, String tag) async {
+    return await _sendCommand('read', {'boxId': boxId, 'tag': tag});
+  }
+
+  Future<void> batch(
+    String boxId,
+    Map<String, Map<String, dynamic>> entries,
+  ) async {
+    return await _sendCommand('batch', {'boxId': boxId, 'entries': entries});
+  }
+
+  Future<Map<String, Map<String, dynamic>>> readBox(String boxId) async {
+    return await _sendCommand('readBox', {'boxId': boxId});
+  }
+
+  Future<List<Map<String, dynamic>>> query(
+    String boxId,
+    String field,
+    String prefix,
+  ) async {
+    return await _sendCommand('query', {
+      'boxId': boxId,
+      'field': field,
+      'prefix': prefix,
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> queryAdvanced({
+    required String boxId,
+    bool Function(Map<String, dynamic>)? filter,
+  }) async {
+    final boxData = await readBox(boxId);
+    final results = <Map<String, dynamic>>[];
+    for (var entry in boxData.values) {
+      if (filter == null || filter(entry)) {
+        results.add(entry);
+      }
+    }
+    return results;
+  }
+
+  Future<void> compact() async {
+    return await _sendCommand('compact', {});
+  }
+
+  Future<void> close() async {
+    return await _sendCommand('close', {});
+  }
+
+  Future<bool> contains(String boxId, String tag) async {
+    return await _sendCommand('contains', {'boxId': boxId, 'tag': tag});
+  }
+}
+
+class Zeytin {
+  final String rootPath;
+  final LRUCache<String, Map<String, dynamic>> _memoryCache;
+  final Map<String, TruckProxy> _activeTrucks = {};
+
+  Zeytin(this.rootPath, {int cacheSize = 50000})
+    : _memoryCache = LRUCache(cacheSize) {
+    Directory(rootPath).createSync(recursive: true);
+  }
+  final StreamController<Map<String, dynamic>> _changeController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  Stream<Map<String, dynamic>> get changes => _changeController.stream;
+  Future<TruckProxy> _resolveTruck({required String truckId}) async {
+    if (_activeTrucks.containsKey(truckId)) {
+      return _activeTrucks[truckId]!;
+    }
+    final truck = TruckProxy(truckId, rootPath);
+    await truck.initialize();
+    _activeTrucks[truckId] = truck;
+    return truck;
+  }
+
+  String _generateCacheKey({
+    required String truckId,
+    required String boxId,
+    required String tag,
+  }) {
+    return '$truckId:$boxId:$tag';
+  }
+
+  Future<void> delete({
+    required String truckId,
+    required String boxId,
+    required String tag,
+  }) async {
+    final key = _generateCacheKey(truckId: truckId, boxId: boxId, tag: tag);
+    _memoryCache.remove(key);
+    _changeController.add({
+      "truckId": truckId,
+      "boxId": boxId,
+      "tag": tag,
+      "op": "DELETE",
+    });
+  }
+
+  Future<void> deleteBox({
+    required String truckId,
+    required String boxId,
+  }) async {
+    final truck = await _resolveTruck(truckId: truckId);
+    final boxData = await truck.readBox(boxId);
+    for (var tag in boxData.keys) {
+      final key = _generateCacheKey(truckId: truckId, boxId: boxId, tag: tag);
+      _memoryCache.remove(key);
+    }
+    _changeController.add({
+      "truckId": truckId,
+      "boxId": boxId,
+      "op": "DELETE_BOX",
+    });
+  }
+
+  Future<void> deleteTruck({required String truckId}) async {
+    if (_activeTrucks.containsKey(truckId)) {
+      await _activeTrucks[truckId]!.close();
+      _activeTrucks.remove(truckId);
+    }
+    final dataFile = File('$rootPath/$truckId.dat');
+    final indexFile = File('$rootPath/$truckId.idx');
+    if (await dataFile.exists()) await dataFile.delete();
+    if (await indexFile.exists()) await indexFile.delete();
+  }
+
+  List<String> getAllTruck() {
+    final dir = Directory(rootPath);
+    return dir
+        .listSync()
+        .where((entity) => entity is File && entity.path.endsWith('.dat'))
+        .map(
+          (entity) => entity.path
+              .split(Platform.pathSeparator)
+              .last
+              .replaceAll('.dat', ''),
+        )
+        .toList();
+  }
+
+  Map<String, TruckProxy> getAllBox() {
+    return Map.unmodifiable(_activeTrucks);
+  }
+
+  Future<void> deleteAll() async {
+    for (var truck in _activeTrucks.values) {
+      await truck.close();
+    }
+    _activeTrucks.clear();
+    _memoryCache.clear();
+    final dir = Directory(rootPath);
+    if (await dir.exists()) {
+      await dir.delete(recursive: true);
+      await dir.create(recursive: true);
+    }
+  }
+
+  Future<void> put({
+    required String truckId,
+    required String boxId,
+    required String tag,
+    required Map<String, dynamic> value,
+  }) async {
+    final truck = await _resolveTruck(truckId: truckId);
+    await truck.write(boxId, tag, value);
+    _memoryCache.put(
+      _generateCacheKey(truckId: truckId, boxId: boxId, tag: tag),
+      value,
+    );
+    _changeController.add({
+      "truckId": truckId,
+      "boxId": boxId,
+      "tag": tag,
+      "op": "PUT",
+      "value": value,
+    });
+  }
+
+  Future<void> putBatch({
+    required String truckId,
+    required String boxId,
+    required Map<String, Map<String, dynamic>> entries,
+  }) async {
+    final truck = await _resolveTruck(truckId: truckId);
+    await truck.batch(boxId, entries);
+    for (var entry in entries.entries) {
+      _memoryCache.put(
+        _generateCacheKey(truckId: truckId, boxId: boxId, tag: entry.key),
+        entry.value,
+      );
+    }
+    _changeController.add({
+      "truckId": truckId,
+      "boxId": boxId,
+      "op": "BATCH",
+      "entries": entries,
+    });
+  }
+
+  Future<Map<String, dynamic>?> get({
+    required String truckId,
+    required String boxId,
+    required String tag,
+  }) async {
+    final cacheKey = _generateCacheKey(
+      truckId: truckId,
+      boxId: boxId,
+      tag: tag,
+    );
+    final cachedValue = _memoryCache.get(cacheKey);
+    if (cachedValue != null) return cachedValue;
+    final truck = await _resolveTruck(truckId: truckId);
+    final data = await truck.read(boxId, tag);
+    if (data != null) {
+      _memoryCache.put(cacheKey, data);
+    }
+    return data;
+  }
+
+  Future<Map<String, Map<String, dynamic>>> getBox({
+    required String truckId,
+    required String boxId,
+  }) async {
+    final truck = await _resolveTruck(truckId: truckId);
+    final boxData = await truck.readBox(boxId);
+    for (var entry in boxData.entries) {
+      _memoryCache.put(
+        _generateCacheKey(truckId: truckId, boxId: boxId, tag: entry.key),
+        entry.value,
+      );
+    }
+    return boxData;
+  }
+
+  Future<List<Map<String, dynamic>>> search(
+    String truckId,
+    String boxId,
+    String field,
+    String prefix,
+  ) async {
+    final truck = await _resolveTruck(truckId: truckId);
+    return await truck.query(boxId, field, prefix);
+  }
+
+  Future<void> compactTruck({required String truckId}) async {
+    if (_activeTrucks.containsKey(truckId)) {
+      final truck = _activeTrucks[truckId]!;
+      await truck.compact();
+      _memoryCache.clear();
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> filter(
+    String truckId,
+    String boxId,
+    bool Function(Map<String, dynamic>) predicate,
+  ) async {
+    final truck = await _resolveTruck(truckId: truckId);
+    return await truck.queryAdvanced(boxId: boxId, filter: predicate);
+  }
+
+  Future<bool> contains(String truckId, String boxId, String tag) async {
+    if (_memoryCache.contains(
+      _generateCacheKey(truckId: truckId, boxId: boxId, tag: tag),
+    )) {
+      return true;
+    }
+    final truck = await _resolveTruck(truckId: truckId);
+    final data = await truck.read(boxId, tag);
+    return data != null;
+  }
+
+  Future<bool> existsTruck({required String truckId}) async {
+    final dataFile = File('$rootPath/$truckId.dat');
+    return await dataFile.exists();
+  }
+
+  Future<bool> existsBox({
+    required String truckId,
+    required String boxId,
+  }) async {
+    if (!await existsTruck(truckId: truckId)) return false;
+    final truck = await _resolveTruck(truckId: truckId);
+    final boxData = await truck.readBox(boxId);
+    return boxData.isNotEmpty;
+  }
+
+  Future<bool> existsTag({
+    required String truckId,
+    required String boxId,
+    required String tag,
+  }) async {
+    final cacheKey = _generateCacheKey(
+      truckId: truckId,
+      boxId: boxId,
+      tag: tag,
+    );
+    if (_memoryCache.contains(cacheKey)) return true;
+    if (!await existsTruck(truckId: truckId)) return false;
+    final truck = await _resolveTruck(truckId: truckId);
+    return await truck.contains(boxId, tag);
+  }
+
+  Future<void> createTruck({required String truckId}) async {
+    if (await existsTruck(truckId: truckId)) return;
+    final truck = TruckProxy(truckId, rootPath);
+    await truck.initialize();
+    _activeTrucks[truckId] = truck;
+  }
+
+  Future<void> close() async {
+    for (var truck in _activeTrucks.values) {
+      await truck.close();
+    }
+    _activeTrucks.clear();
+    _memoryCache.clear();
+  }
+}
+
+
+============================================================
+FILE: lib\logic\gatekeeper.dart
+============================================================
+
+import 'dart:async';
+import 'dart:convert';
+import 'package:shelf/shelf.dart';
+import 'package:zeytin/models/response.dart';
+import 'package:zeytin/tools/ip.dart';
+import '../config.dart';
+
+class IpActivity {
+  int lastTruckCreated = 0;
+  int truckCount = 0;
+  List<int> requestTimestamps = [];
+  int lastTokenRequest = 0;
+  bool isBanned = false;
+}
+
+class Gatekeeper {
+  static Map<String, IpActivity> ipRegistry = {};
+  static int globalRequestCount = 0;
+  static int sleepModeUntil = 0;
+
+  static Future<Response?> check(Request request) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+
+    if (ZeytinConfig.sleepModeEnabled && now < sleepModeUntil) {
+      return Response(503, body: "Be quiet! I'm trying to sleep here.");
+    }
+
+    globalRequestCount++;
+    if (globalRequestCount > ZeytinConfig.globalDosThreshold) {
+      sleepModeUntil = now + ZeytinConfig.dosCooldownMs;
+      globalRequestCount = 0;
+      return Response(503, body: "Be quiet! I'm trying to sleep here.");
+    }
+    Timer(const Duration(seconds: 5), () => globalRequestCount = 0);
+
+    final String ip = getClientIp(request);
+
+    if (ZeytinConfig.blackList.contains(ip)) {
+      return Response.forbidden(
+        jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opss...",
+            error: "I see I've banned your IP address. Get out!",
+          ).toMap(),
+        ),
+      );
+    }
+
+    if (ZeytinConfig.whiteList.contains(ip)) {
+      return null;
+    }
+
+    final activity = ipRegistry.putIfAbsent(ip, () => IpActivity());
+
+    if (activity.isBanned) {
+      return Response.forbidden(
+        jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opss...",
+            error: "I see I've banned your IP address. Get out!",
+          ).toMap(),
+        ),
+      );
+    }
+
+    activity.requestTimestamps.add(now);
+    activity.requestTimestamps.removeWhere((t) => now - t > 5000);
+
+    if (activity.requestTimestamps.length >
+        ZeytinConfig.generalIpRateLimit5Sec) {
+      return Response(
+        429,
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opss...",
+            error: "Whoa, fast kid! Slow down, or...",
+          ).toMap(),
+        ),
+      );
+    }
+
+    if (request.url.path == 'token/create') {
+      if (now - activity.lastTokenRequest < ZeytinConfig.ipRateLimitMs) {
+        return Response(
+          429,
+          body: jsonEncode(
+            ZeytinResponse(
+              isSuccess: false,
+              message: "Opss...",
+              error:
+                  "I understand you need that token, but you need to slow down a bit. You can request it once every second.",
+            ).toMap(),
+          ),
+        );
+      }
+      activity.lastTokenRequest = now;
+    }
+
+    return null;
+  }
+}
+
+
+============================================================
+FILE: lib\models\response.dart
+============================================================
+
+class ZeytinResponse {
+  final bool isSuccess;
+  final String message;
+  final String? error;
+  final Map<String, dynamic>? data;
+
+  ZeytinResponse({
+    required this.isSuccess,
+    required this.message,
+    this.error,
+    this.data,
+  });
+
+  factory ZeytinResponse.fromMap(Map<String, dynamic> map) {
+    return ZeytinResponse(
+      isSuccess: map['isSuccess'] ?? false,
+      message: map['message'] ?? '',
+      error: map['error'],
+      data: Map<String, dynamic>.from(map['data'] ?? {}),
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      "isSuccess": isSuccess,
+      "message": message,
+      if (error != null) "error": error,
+      if (data != null) "data": data,
+    };
+  }
+}
+
+
+============================================================
+FILE: lib\routes\account.dart
+============================================================
+
+import 'dart:convert';
+import 'package:shelf/shelf.dart';
+import 'package:shelf_router/shelf_router.dart';
+import 'package:zeytin/logic/account.dart';
+import 'package:zeytin/logic/engine.dart';
+import 'package:zeytin/logic/gatekeeper.dart';
+import 'package:zeytin/models/response.dart';
+import 'package:zeytin/config.dart';
+import 'package:zeytin/tools/ip.dart';
+
+void accountRoutes(Zeytin zeytin, Router router) {
+  router.post('/truck/create', (Request request) async {
+    final payload = await request.readAsString();
+    final data = jsonDecode(payload);
+
+    final String? email = data['email'];
+    final String? password = data['password'];
+
+    if (email == null || password == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opss...",
+            error: "Email and password parameters are mandatory.",
+          ).toMap(),
+        ),
+      );
+    }
+    final String ip = getClientIp(request);
+    final activity = Gatekeeper.ipRegistry[ip];
+    final now = DateTime.now().millisecondsSinceEpoch;
+
+    if (activity != null) {
+      if (activity.truckCount >= ZeytinConfig.maxTruckPerIp) {
+        activity.isBanned = true;
+        return Response.forbidden(
+          jsonEncode(
+            ZeytinResponse(
+              isSuccess: false,
+              message: "Opss...",
+              error:
+                  "You have reached the maximum truck limit for this IP. You are banned!",
+            ).toMap(),
+          ),
+        );
+      }
+      if (now - activity.lastTruckCreated <
+          ZeytinConfig.truckCreationCooldownMs) {
+        return Response(
+          429,
+          body: jsonEncode(
+            ZeytinResponse(
+              isSuccess: false,
+              message: "Opss...",
+              error:
+                  "You can only create one truck every 10 minutes. Slow down.",
+            ).toMap(),
+          ),
+        );
+      }
+    }
+    if (zeytin.getAllTruck().length >= ZeytinConfig.maxTruckCount) {
+      return Response(
+        507,
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opss...",
+            error: "System storage is full. No more trucks can be created.",
+          ).toMap(),
+        ),
+      );
+    }
+
+    ZeytinResponse zeytinResponse = await ZeytinAccounts.createAccount(
+      zeytin,
+      email,
+      password,
+    );
+
+    if (zeytinResponse.isSuccess) {
+      if (activity != null) {
+        activity.lastTruckCreated = now;
+        activity.truckCount++;
+      }
+      return Response.ok(jsonEncode(zeytinResponse.toMap()));
+    } else {
+      return Response.badRequest(body: jsonEncode(zeytinResponse.toMap()));
+    }
+  });
+
+  router.post('/truck/id', (Request request) async {
+    final payload = await request.readAsString();
+    final data = jsonDecode(payload);
+
+    final String? email = data['email'];
+    final String? password = data['password'];
+
+    if (email == null || password == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opss...",
+            error: "Email and password parameters are mandatory.",
+          ).toMap(),
+        ),
+      );
+    }
+
+    ZeytinResponse zeytinResponse = await ZeytinAccounts.login(
+      zeytin,
+      email,
+      password,
+    );
+
+    if (zeytinResponse.isSuccess) {
+      return Response.ok(jsonEncode(zeytinResponse.toMap()));
+    } else {
+      return Response.badRequest(body: jsonEncode(zeytinResponse.toMap()));
+    }
+  });
+}
+
+
+============================================================
+FILE: lib\routes\crud.dart
+============================================================
+
+import 'dart:convert';
+
+import 'package:shelf/shelf.dart';
+import 'package:shelf_router/shelf_router.dart';
+import 'package:zeytin/logic/engine.dart';
+import 'package:zeytin/models/response.dart';
+import 'package:zeytin/routes/token.dart';
+import 'package:zeytin/tools/tokener.dart';
+
+void crudRoutes(Zeytin zeytin, Router router) {
+  router.post('/data/add', (Request request) async {
+    final payload = await request.readAsString();
+    final datas = jsonDecode(payload);
+
+    final String? token = datas['token'];
+    final String? data = datas['data'];
+    if (token == null || data == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "Token and data parameters are mandatory when making requests to this endpoint.",
+          ).toMap(),
+        ),
+      );
+    }
+    var tokenData = getTokenData(token);
+    if (tokenData == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "The token manager gave an error. Please verify the token's validity.",
+          ).toMap(),
+        ),
+      );
+    }
+    String truck = tokenData["truck"];
+    String password = tokenData["password"];
+    var dataDecrypted = ZeytinTokener(password).decryptMap(data);
+    if (dataDecrypted["box"] == null ||
+        dataDecrypted["tag"] == null ||
+        dataDecrypted["value"] == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "Box, tag and value parameters are mandatory when making requests to this endpoint.",
+          ).toMap(),
+        ),
+      );
+    } else {
+      if (dataDecrypted["value"] is Map) {
+        await zeytin.put(
+          truckId: truck,
+          boxId: dataDecrypted["box"],
+          tag: dataDecrypted["tag"],
+          value: dataDecrypted["value"],
+        );
+        return Response.ok(
+          jsonEncode(
+            ZeytinResponse(isSuccess: true, message: "Oki doki!").toMap(),
+          ),
+        );
+      } else {
+        return Response.badRequest(
+          body: jsonEncode(
+            ZeytinResponse(
+              isSuccess: false,
+              message: "Opps...",
+              error:
+                  "The Value parameter must be of type Map<String, dynamic>.",
+            ).toMap(),
+          ),
+        );
+      }
+    }
+  });
+
+  router.post('/data/get', (Request request) async {
+    final payload = await request.readAsString();
+    final datas = jsonDecode(payload);
+
+    final String? token = datas['token'];
+    final String? data = datas['data'];
+    if (token == null || data == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "Token and data parameters are mandatory when making requests to this endpoint.",
+          ).toMap(),
+        ),
+      );
+    }
+    var tokenData = getTokenData(token);
+    if (tokenData == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "The token manager gave an error. Please verify the token's validity.",
+          ).toMap(),
+        ),
+      );
+    }
+    String truck = tokenData["truck"];
+    String password = tokenData["password"];
+    var dataDecrypted = ZeytinTokener(password).decryptMap(data);
+    if (dataDecrypted["box"] == null || dataDecrypted["tag"] == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "Box and tag parameters are mandatory when making requests to this endpoint.",
+          ).toMap(),
+        ),
+      );
+    } else {
+      var getData = await zeytin.get(
+        truckId: truck,
+        boxId: dataDecrypted["box"],
+        tag: dataDecrypted["tag"],
+      );
+      if (getData == null) {
+        return Response.badRequest(
+          body: jsonEncode(
+            ZeytinResponse(
+              isSuccess: false,
+              message: "Opps...",
+              error: "This box does not contain any such data.",
+            ).toMap(),
+          ),
+        );
+      }
+      final encryptedData = ZeytinTokener(password).encryptMap(getData);
+      return Response.ok(
+        jsonEncode({
+          "isSuccess": true,
+          "message": "Oki doki!",
+          "data": encryptedData,
+        }),
+      );
+    }
+  });
+
+  router.post('/data/delete', (Request request) async {
+    final payload = await request.readAsString();
+    final datas = jsonDecode(payload);
+
+    final String? token = datas['token'];
+    final String? data = datas['data'];
+    if (token == null || data == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "Token and data parameters are mandatory when making requests to this endpoint.",
+          ).toMap(),
+        ),
+      );
+    }
+    var tokenData = getTokenData(token);
+    if (tokenData == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "The token manager gave an error. Please verify the token's validity.",
+          ).toMap(),
+        ),
+      );
+    }
+    String truck = tokenData["truck"];
+    String password = tokenData["password"];
+    var dataDecrypted = ZeytinTokener(password).decryptMap(data);
+    if (dataDecrypted["box"] == null || dataDecrypted["tag"] == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "Box and tag parameters are mandatory when making requests to this endpoint.",
+          ).toMap(),
+        ),
+      );
+    } else {
+      await zeytin.delete(
+        truckId: truck,
+        boxId: dataDecrypted["box"],
+        tag: dataDecrypted["tag"],
+      );
+      return Response.ok(
+        jsonEncode(
+          ZeytinResponse(isSuccess: true, message: "Oki doki!").toMap(),
+        ),
+      );
+    }
+  });
+
+  router.post('/data/deleteBox', (Request request) async {
+    final payload = await request.readAsString();
+    final datas = jsonDecode(payload);
+
+    final String? token = datas['token'];
+    final String? data = datas['data'];
+    if (token == null || data == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "Token and data parameters are mandatory when making requests to this endpoint.",
+          ).toMap(),
+        ),
+      );
+    }
+    var tokenData = getTokenData(token);
+    if (tokenData == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "The token manager gave an error. Please verify the token's validity.",
+          ).toMap(),
+        ),
+      );
+    }
+    String truck = tokenData["truck"];
+    String password = tokenData["password"];
+    var dataDecrypted = ZeytinTokener(password).decryptMap(data);
+    if (dataDecrypted["box"] == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "Box parameter is mandatory when making requests to this endpoint.",
+          ).toMap(),
+        ),
+      );
+    } else {
+      await zeytin.deleteBox(truckId: truck, boxId: dataDecrypted["box"]);
+      return Response.ok(
+        jsonEncode(
+          ZeytinResponse(isSuccess: true, message: "Oki doki!").toMap(),
+        ),
+      );
+    }
+  });
+
+  router.post('/data/addBatch', (Request request) async {
+    final payload = await request.readAsString();
+    final datas = jsonDecode(payload);
+
+    final String? token = datas['token'];
+    final String? data = datas['data'];
+    if (token == null || data == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "Token and data parameters are mandatory when making requests to this endpoint.",
+          ).toMap(),
+        ),
+      );
+    }
+    var tokenData = getTokenData(token);
+    if (tokenData == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "The token manager gave an error. Please verify the token's validity.",
+          ).toMap(),
+        ),
+      );
+    }
+    String truck = tokenData["truck"];
+    String password = tokenData["password"];
+    var dataDecrypted = ZeytinTokener(password).decryptMap(data);
+    if (dataDecrypted["box"] == null || dataDecrypted["entries"] == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "Box and entries parameters are mandatory when making requests to this endpoint.",
+          ).toMap(),
+        ),
+      );
+    } else {
+      if (dataDecrypted["entries"] is Map) {
+        Map<String, Map<String, dynamic>> entries = {};
+        (dataDecrypted["entries"] as Map).forEach((key, value) {
+          if (value is Map<String, dynamic>) {
+            entries[key.toString()] = value;
+          }
+        });
+
+        await zeytin.putBatch(
+          truckId: truck,
+          boxId: dataDecrypted["box"],
+          entries: entries,
+        );
+        return Response.ok(
+          jsonEncode(
+            ZeytinResponse(isSuccess: true, message: "Oki doki!").toMap(),
+          ),
+        );
+      } else {
+        return Response.badRequest(
+          body: jsonEncode(
+            ZeytinResponse(
+              isSuccess: false,
+              message: "Opps...",
+              error:
+                  "The Entries parameter must be of type Map<String, Map<String, dynamic>>.",
+            ).toMap(),
+          ),
+        );
+      }
+    }
+  });
+
+  router.post('/data/getBox', (Request request) async {
+    final payload = await request.readAsString();
+    final datas = jsonDecode(payload);
+
+    final String? token = datas['token'];
+    final String? data = datas['data'];
+    if (token == null || data == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "Token and data parameters are mandatory when making requests to this endpoint.",
+          ).toMap(),
+        ),
+      );
+    }
+    var tokenData = getTokenData(token);
+    if (tokenData == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "The token manager gave an error. Please verify the token's validity.",
+          ).toMap(),
+        ),
+      );
+    }
+    String truck = tokenData["truck"];
+    String password = tokenData["password"];
+    var dataDecrypted = ZeytinTokener(password).decryptMap(data);
+    if (dataDecrypted["box"] == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "Box parameter is mandatory when making requests to this endpoint.",
+          ).toMap(),
+        ),
+      );
+    } else {
+      var boxData = await zeytin.getBox(
+        truckId: truck,
+        boxId: dataDecrypted["box"],
+      );
+      final encryptedData = ZeytinTokener(password).encryptMap(boxData);
+      return Response.ok(
+        jsonEncode({
+          "isSuccess": true,
+          "message": "Oki doki!",
+          "data": encryptedData,
+        }),
+      );
+    }
+  });
+
+  router.post('/data/existsBox', (Request request) async {
+    final payload = await request.readAsString();
+    final datas = jsonDecode(payload);
+
+    final String? token = datas['token'];
+    final String? data = datas['data'];
+    if (token == null || data == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "Token and data parameters are mandatory when making requests to this endpoint.",
+          ).toMap(),
+        ),
+      );
+    }
+    var tokenData = getTokenData(token);
+    if (tokenData == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "The token manager gave an error. Please verify the token's validity.",
+          ).toMap(),
+        ),
+      );
+    }
+    String truck = tokenData["truck"];
+    String password = tokenData["password"];
+    var dataDecrypted = ZeytinTokener(password).decryptMap(data);
+    if (dataDecrypted["box"] == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "Box parameter is mandatory when making requests to this endpoint.",
+          ).toMap(),
+        ),
+      );
+    } else {
+      bool exists = await zeytin.existsBox(
+        truckId: truck,
+        boxId: dataDecrypted["box"],
+      );
+      final encryptedData = ZeytinTokener(
+        password,
+      ).encryptMap({"exists": exists});
+      return Response.ok(
+        jsonEncode({
+          "isSuccess": true,
+          "message": "Oki doki!",
+          "data": encryptedData,
+        }),
+      );
+    }
+  });
+
+  router.post('/data/existsTag', (Request request) async {
+    final payload = await request.readAsString();
+    final datas = jsonDecode(payload);
+
+    final String? token = datas['token'];
+    final String? data = datas['data'];
+    if (token == null || data == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "Token and data parameters are mandatory when making requests to this endpoint.",
+          ).toMap(),
+        ),
+      );
+    }
+    var tokenData = getTokenData(token);
+    if (tokenData == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "The token manager gave an error. Please verify the token's validity.",
+          ).toMap(),
+        ),
+      );
+    }
+    String truck = tokenData["truck"];
+    String password = tokenData["password"];
+    var dataDecrypted = ZeytinTokener(password).decryptMap(data);
+    if (dataDecrypted["box"] == null || dataDecrypted["tag"] == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "Box and tag parameters are mandatory when making requests to this endpoint.",
+          ).toMap(),
+        ),
+      );
+    } else {
+      bool exists = await zeytin.existsTag(
+        truckId: truck,
+        boxId: dataDecrypted["box"],
+        tag: dataDecrypted["tag"],
+      );
+      final encryptedData = ZeytinTokener(
+        password,
+      ).encryptMap({"exists": exists});
+      return Response.ok(
+        jsonEncode({
+          "isSuccess": true,
+          "message": "Oki doki!",
+          "data": encryptedData,
+        }),
+      );
+    }
+  });
+
+  router.post('/data/contains', (Request request) async {
+    final payload = await request.readAsString();
+    final datas = jsonDecode(payload);
+
+    final String? token = datas['token'];
+    final String? data = datas['data'];
+    if (token == null || data == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "Token and data parameters are mandatory when making requests to this endpoint.",
+          ).toMap(),
+        ),
+      );
+    }
+    var tokenData = getTokenData(token);
+    if (tokenData == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "The token manager gave an error. Please verify the token's validity.",
+          ).toMap(),
+        ),
+      );
+    }
+    String truck = tokenData["truck"];
+    String password = tokenData["password"];
+    var dataDecrypted = ZeytinTokener(password).decryptMap(data);
+    if (dataDecrypted["box"] == null || dataDecrypted["tag"] == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "Box and tag parameters are mandatory when making requests to this endpoint.",
+          ).toMap(),
+        ),
+      );
+    } else {
+      bool result = await zeytin.contains(
+        truck,
+        dataDecrypted["box"],
+        dataDecrypted["tag"],
+      );
+      final encryptedData = ZeytinTokener(
+        password,
+      ).encryptMap({"contains": result});
+      return Response.ok(
+        jsonEncode({
+          "isSuccess": true,
+          "message": "Oki doki!",
+          "data": encryptedData,
+        }),
+      );
+    }
+  });
+
+  router.post('/data/search', (Request request) async {
+    final payload = await request.readAsString();
+    final datas = jsonDecode(payload);
+
+    final String? token = datas['token'];
+    final String? data = datas['data'];
+    if (token == null || data == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "Token and data parameters are mandatory when making requests to this endpoint.",
+          ).toMap(),
+        ),
+      );
+    }
+    var tokenData = getTokenData(token);
+    if (tokenData == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "The token manager gave an error. Please verify the token's validity.",
+          ).toMap(),
+        ),
+      );
+    }
+    String truck = tokenData["truck"];
+    String password = tokenData["password"];
+    var dataDecrypted = ZeytinTokener(password).decryptMap(data);
+    if (dataDecrypted["box"] == null ||
+        dataDecrypted["field"] == null ||
+        dataDecrypted["prefix"] == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "Box, field and prefix parameters are mandatory when making requests to this endpoint.",
+          ).toMap(),
+        ),
+      );
+    } else {
+      var results = await zeytin.search(
+        truck,
+        dataDecrypted["box"],
+        dataDecrypted["field"],
+        dataDecrypted["prefix"],
+      );
+      final encryptedData = ZeytinTokener(
+        password,
+      ).encryptMap({"results": results});
+      return Response.ok(
+        jsonEncode({
+          "isSuccess": true,
+          "message": "Oki doki!",
+          "data": encryptedData,
+        }),
+      );
+    }
+  });
+
+  router.post('/data/filter', (Request request) async {
+    final payload = await request.readAsString();
+    final datas = jsonDecode(payload);
+
+    final String? token = datas['token'];
+    final String? data = datas['data'];
+    if (token == null || data == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "Token and data parameters are mandatory when making requests to this endpoint.",
+          ).toMap(),
+        ),
+      );
+    }
+    var tokenData = getTokenData(token);
+    if (tokenData == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "The token manager gave an error. Please verify the token's validity.",
+          ).toMap(),
+        ),
+      );
+    }
+    String truck = tokenData["truck"];
+    String password = tokenData["password"];
+    var dataDecrypted = ZeytinTokener(password).decryptMap(data);
+    if (dataDecrypted["box"] == null ||
+        dataDecrypted["field"] == null ||
+        dataDecrypted["value"] == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "Box, field and value parameters are mandatory when making requests to this endpoint.",
+          ).toMap(),
+        ),
+      );
+    } else {
+      var results = await zeytin.filter(
+        truck,
+        dataDecrypted["box"],
+        (map) => map[dataDecrypted["field"]] == dataDecrypted["value"],
+      );
+      final encryptedData = ZeytinTokener(
+        password,
+      ).encryptMap({"results": results});
+      return Response.ok(
+        jsonEncode({
+          "isSuccess": true,
+          "message": "Oki doki!",
+          "data": encryptedData,
+        }),
+      );
+    }
+  });
+}
+
+
+============================================================
+FILE: lib\routes\storage.dart
+============================================================
+
+import 'dart:convert';
+import 'dart:io';
+import 'package:path/path.dart' as p;
+import 'package:shelf/shelf.dart';
+import 'package:shelf_multipart/shelf_multipart.dart';
+import 'package:shelf_router/shelf_router.dart';
+import 'package:mime/mime.dart';
+import 'package:zeytin/logic/engine.dart';
+import 'package:zeytin/models/response.dart';
+import 'package:zeytin/routes/token.dart';
+
+void storageRoutes(Zeytin zeytin, Router router) {
+  router.post('/storage/upload', (Request request) async {
+    final multipartRequest = request.multipart();
+
+    if (multipartRequest == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opss...",
+            error: "Multipart request expected.",
+          ).toMap(),
+        ),
+      );
+    }
+
+    String? token;
+    String? truckId;
+    final forbiddenExtensions = ['.exe', '.sh', '.bat', '.php', '.py', '.js'];
+
+    await for (final part in multipartRequest.parts) {
+      final contentDisposition = part.headers['content-disposition'];
+      if (contentDisposition == null) continue;
+
+      if (contentDisposition.contains('name="token"')) {
+        token = await part.readString();
+        final tokenData = getTokenData(token);
+        if (tokenData != null) {
+          truckId = tokenData["truck"];
+        }
+      }
+
+      if (contentDisposition.contains('name="file"')) {
+        if (token == null || truckId == null) {
+          return Response.forbidden(
+            jsonEncode(
+              ZeytinResponse(
+                isSuccess: false,
+                message: "Opss...",
+                error: "Invalid or missing token before file part.",
+              ).toMap(),
+            ),
+          );
+        }
+
+        final match = RegExp(
+          r'filename="([^"]+)"',
+        ).firstMatch(contentDisposition);
+        final fileName = match?.group(1) ?? "unnamed_file";
+        final extension = p.extension(fileName).toLowerCase();
+        final safeName = fileName.replaceAll(RegExp(r'[^\w\-. ]'), '');
+        if (safeName != fileName ||
+            fileName.contains('..') ||
+            !fileName.contains('.')) {
+          return Response.forbidden(
+            jsonEncode(
+              ZeytinResponse(
+                isSuccess: false,
+                message: "Opss...",
+                error: "The file name contains invalid characters!",
+              ).toMap(),
+            ),
+          );
+        }
+        if (forbiddenExtensions.contains(extension)) {
+          return Response.forbidden(
+            jsonEncode(
+              ZeytinResponse(
+                isSuccess: false,
+                message: "Risky file!",
+                error:
+                    "I know you're innocent. You're not a malicious hacker. But still, to be on the safe side, I can't accept these files.",
+              ).toMap(),
+            ),
+          );
+        }
+
+        final storageDir = Directory("${zeytin.rootPath}/$truckId/storage");
+        if (!await storageDir.exists()) {
+          await storageDir.create(recursive: true);
+        }
+
+        final file = File(p.join(storageDir.path, fileName));
+        final ios = file.openWrite();
+        await ios.addStream(part);
+        await ios.close();
+
+        return Response.ok(
+          jsonEncode(
+            ZeytinResponse(
+              isSuccess: true,
+              message: "Oki doki!",
+              data: {"url": "/$truckId/$fileName"},
+            ).toMap(),
+          ),
+        );
+      }
+    }
+
+    return Response.badRequest(
+      body: jsonEncode(
+        ZeytinResponse(
+          isSuccess: false,
+          message: "Opss...",
+          error: "Missing file part.",
+        ).toMap(),
+      ),
+    );
+  });
+
+  router.get('/<truckId>/<fileName>', (
+    Request request,
+    String truckId,
+    String fileName,
+  ) async {
+    final filePath = "${zeytin.rootPath}/$truckId/storage/$fileName";
+    final file = File(filePath);
+
+    if (await file.exists()) {
+      final contentType =
+          lookupMimeType(fileName) ?? 'application/octet-stream';
+
+      return Response.ok(
+        file.openRead(),
+        headers: {'Content-Type': contentType, 'Content-Disposition': 'inline'},
+      );
+    }
+
+    return Response.notFound(
+      jsonEncode(
+        ZeytinResponse(
+          isSuccess: false,
+          message: "Opss...",
+          error: "Dosya bulunamadı.",
+        ).toMap(),
+      ),
+    );
+  });
+}
+
+
+============================================================
+FILE: lib\routes\token.dart
+============================================================
+
+import 'dart:convert';
+
+import 'package:shelf/shelf.dart';
+import 'package:shelf_router/shelf_router.dart';
+import 'package:uuid/uuid.dart';
+import 'package:zeytin/logic/account.dart';
+import 'package:zeytin/logic/engine.dart';
+import 'package:zeytin/models/response.dart';
+
+List<Map<String, dynamic>> tokens = [];
+void tokenRoutes(Zeytin zeytin, Router router) {
+  router.post('/token/create', (Request request) async {
+    final payload = await request.readAsString();
+    final data = jsonDecode(payload);
+
+    final String? email = data['email'];
+    final String? password = data['password'];
+
+    if (email == null || password == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error:
+                "Email and password parameters are mandatory when making requests to this endpoint.",
+          ).toMap(),
+        ),
+      );
+    }
+    String? myToken = getTokenByCredentials(email, password);
+    if (myToken != null) {
+      bool valid = isTokenValid(myToken);
+      if (valid) {
+        return Response.ok(
+          jsonEncode(
+            ZeytinResponse(
+              isSuccess: true,
+              message: "Oki doki!",
+              data: {"token": myToken},
+            ).toMap(),
+          ),
+        );
+      } else {
+        return await _createToken(zeytin, router, email, password);
+      }
+    } else {
+      return await _createToken(zeytin, router, email, password);
+    }
+  });
+  router.delete('/token/delete', (Request request) async {
+    final payload = await request.readAsString();
+    final data = jsonDecode(payload);
+
+    final String? email = data['email'];
+    final String? password = data['password'];
+
+    if (email == null || password == null) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opps...",
+            error: "Credentials are required.",
+          ).toMap(),
+        ),
+      );
+    }
+
+    final bool deleted = _deleteTokenByCredentials(email, password);
+
+    if (deleted) {
+      return Response.ok(
+        jsonEncode(
+          ZeytinResponse(
+            isSuccess: true,
+            message: "Token deleted successfully.",
+          ).toMap(),
+        ),
+      );
+    } else {
+      return Response.notFound(
+        jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "No active token found or invalid credentials.",
+          ).toMap(),
+        ),
+      );
+    }
+  });
+}
+
+bool _deleteTokenByCredentials(String email, String password) {
+  final initialLength = tokens.length;
+  tokens.removeWhere(
+    (element) => element['email'] == email && element['password'] == password,
+  );
+  return tokens.length < initialLength;
+}
+
+Future<Response> _createToken(
+  Zeytin zeytin,
+  Router router,
+  String email,
+  String password,
+) async {
+  ZeytinResponse zeytinResponse = await ZeytinAccounts.login(
+    zeytin,
+    email,
+    password,
+  );
+  if (zeytinResponse.isSuccess) {
+    String token = Uuid().v4();
+    String id = zeytinResponse.data!["id"];
+    tokens.add({
+      "truck": id,
+      "email": email,
+      "password": password,
+      "token": token,
+      "create_at": DateTime.now().millisecondsSinceEpoch,
+    });
+    return Response.ok(
+      jsonEncode(
+        ZeytinResponse(
+          isSuccess: true,
+          message: "Oki doki!",
+          data: {"token": token},
+        ).toMap(),
+      ),
+    );
+  } else {
+    return Response.badRequest(body: jsonEncode(zeytinResponse.toMap()));
+  }
+}
+
+Map<String, dynamic>? getTokenData(String token) {
+  try {
+    return tokens.firstWhere((element) => element['token'] == token);
+  } catch (_) {
+    return null;
+  }
+}
+
+bool isTokenValid(String token) {
+  final now = DateTime.now().millisecondsSinceEpoch;
+  final index = tokens.indexWhere((element) => element['token'] == token);
+
+  if (index == -1) {
+    return false;
+  }
+
+  final tokenData = tokens[index];
+  final createdAt = tokenData['create_at'] as int;
+
+  if (now - createdAt > 120000) {
+    tokens.removeAt(index);
+    return false;
+  }
+
+  return true;
+}
+
+String? getTokenByCredentials(String email, String password) {
+  try {
+    final entry = tokens.firstWhere(
+      (element) => element['email'] == email && element['password'] == password,
+    );
+    return entry['token'] as String;
+  } catch (_) {
+    return null;
+  }
+}
+
+
+============================================================
+FILE: lib\routes\watch.dart
+============================================================
+
+import 'dart:convert';
+import 'package:shelf/shelf.dart';
+import 'package:shelf_router/shelf_router.dart';
+import 'package:shelf_web_socket/shelf_web_socket.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:zeytin/logic/engine.dart';
+import 'package:zeytin/routes/token.dart';
+import 'package:zeytin/tools/tokener.dart';
+
+void watchRoutes(Zeytin zeytin, Router router) {
+  router.get('/data/watch/<token>/<boxId>', (
+    Request request,
+    String token,
+    String boxId,
+  ) {
+    return webSocketHandler((WebSocketChannel webSocket, _) {
+      final tokenData = getTokenData(token);
+
+      if (tokenData == null || !isTokenValid(token)) {
+        webSocket.sink.add(jsonEncode({"error": "Unauthorized"}));
+        webSocket.sink.close();
+        return;
+      }
+
+      final String truckId = tokenData["truck"];
+      final String password = tokenData["password"];
+      final tokener = ZeytinTokener(password);
+
+      final subscription = zeytin.changes.listen((change) {
+        // Sadece bu kullanıcıya ait TRUCK ve seçtiği BOX ise gönder
+        if (change["truckId"] == truckId && change["boxId"] == boxId) {
+          final payload = {
+            "op": change["op"],
+            "tag": change["tag"],
+            "data": change["value"] != null
+                ? tokener.encryptMap(change["value"])
+                : null,
+            "entries": change["entries"] != null
+                ? tokener.encryptMap(change["entries"])
+                : null,
+          };
+          webSocket.sink.add(jsonEncode(payload));
+        }
+      });
+
+      webSocket.stream.listen(
+        null,
+        onDone: () {
+          subscription.cancel();
+        },
+      );
+    })(request);
+  });
+}
+
+
+============================================================
+FILE: lib\tools\ip.dart
+============================================================
+
+import 'package:shelf/shelf.dart';
+
+ String getClientIp(Request request) {
+  final xForwardedFor = request.headers['x-forwarded-for'];
+  if (xForwardedFor != null && xForwardedFor.isNotEmpty) {
+    return xForwardedFor.split(',').first.trim();
+  }
+
+  final xRealIp = request.headers['x-real-ip'];
+  if (xRealIp != null && xRealIp.isNotEmpty) {
+    return xRealIp;
+  }
+  final connInfo = request.context['shelf.io.connection_info'];
+  if (connInfo != null) {
+    return (connInfo as dynamic).remoteAddress.address;
+  }
+
+  return 'unknown';
+}
+
+============================================================
+FILE: lib\tools\random_code.dart
+============================================================
+
+import 'dart:math';
+
+int generateTenDigitRandomNumber() {
+  final random = Random();
+  int min = 1000000000;
+  int max = 9999999999;
+  
+  int result = min + random.nextInt(max - min);
+  return result;
+}
+
+============================================================
+FILE: lib\tools\tokener.dart
+============================================================
+
+import 'dart:convert';
+import 'dart:typed_data';
+import 'package:crypto/crypto.dart';
+import 'package:encrypt/encrypt.dart';
+
+class ZeytinTokener {
+  final Key key;
+  final Encrypter encrypter;
+
+  ZeytinTokener(String passphrase)
+    : key = _deriveKey(passphrase),
+      encrypter = Encrypter(AES(_deriveKey(passphrase), mode: AESMode.cbc));
+
+  static Key _deriveKey(String passphrase) {
+    final bytes = utf8.encode(passphrase);
+    final hash = sha256.convert(bytes).bytes;
+    return Key(Uint8List.fromList(hash));
+  }
+
+  String encryptMap(Map<String, dynamic> data) {
+    final iv = IV.fromSecureRandom(16);
+    final plainText = jsonEncode(data);
+    final encrypted = encrypter.encrypt(plainText, iv: iv);
+    return "${iv.base64}:${encrypted.base64}";
+  }
+
+  Map<String, dynamic> decryptMap(String encryptedData) {
+    final parts = encryptedData.split(':');
+    if (parts.length != 2) {
+      throw FormatException("Invalid encrypted data format");
+    }
+    final iv = IV.fromBase64(parts[0]);
+    final cipherText = parts[1];
+    final decrypted = encrypter.decrypt(
+      Encrypted.fromBase64(cipherText),
+      iv: iv,
+    );
+    return jsonDecode(decrypted) as Map<String, dynamic>;
+  }
+}
+
+
+============================================================
+FILE: test\server_test.dart
+============================================================
+
+import 'dart:io';
+
+import 'package:http/http.dart';
+import 'package:test/test.dart';
+
+void main() {
+  final port = '12852';
+  final host = 'http://0.0.0.0:$port';
+  late Process p;
+
+  setUp(() async {
+    p = await Process.start(
+      'dart',
+      ['run', 'bin/server.dart'],
+      environment: {'PORT': port},
+    );
+    // Wait for server to start and print to stdout.
+    await p.stdout.first;
+  });
+
+  tearDown(() => p.kill());
+
+  test('Root', () async {
+    final response = await get(Uri.parse('$host/'));
+    expect(response.statusCode, 200);
+    expect(response.body, 'Hello, World!\n');
+  });
+
+  test('Echo', () async {
+    final response = await get(Uri.parse('$host/echo/hello'));
+    expect(response.statusCode, 200);
+    expect(response.body, 'hello\n');
+  });
+
+  test('404', () async {
+    final response = await get(Uri.parse('$host/foobar'));
+    expect(response.statusCode, 404);
+  });
+}
