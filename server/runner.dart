@@ -45,9 +45,11 @@ void main() async {
 
     switch (choice) {
       case '1':
+        await _checkAndManageLiveKit();
         await _startTestMode();
         break;
       case '2':
+        await _checkAndManageLiveKit();
         await _startLiveMode();
         break;
       case '3':
@@ -147,8 +149,9 @@ Future<void> _updateSystem() async {
 
   print('[@] Backing up local configs...');
   final hasConfig = await File('$root/lib/config.dart').exists();
-  if (hasConfig)
+  if (hasConfig) {
     await File('$root/lib/config.dart').copy('/tmp/zeytin_config.bak');
+  }
 
   print('[@] Pulling latest changes from Git...');
   var gitRes = await Process.run('git', [
@@ -226,6 +229,43 @@ Future<void> _cleanDatabase() async {
   if (dbErrDir.existsSync()) dbErrDir.deleteSync(recursive: true);
 
   print('$_kRed[CLEAN] Database and error folders removed.$_kReset');
+}
+
+Future<void> _checkAndManageLiveKit() async {
+  print('$_kCyan[INIT] Checking LiveKit status...$_kReset');
+  try {
+    var checkDocker = await Process.run('docker', ['--version']);
+    if (checkDocker.exitCode != 0) return;
+  } catch (e) {
+    return;
+  }
+  var containerCheck = await Process.run('docker', [
+    'ps',
+    '-a',
+    '--filter',
+    'name=zeytin-livekit',
+    '--format',
+    '{{.Names}}',
+  ]);
+
+  if (containerCheck.stdout.toString().trim() == 'zeytin-livekit') {
+    var runningCheck = await Process.run('docker', [
+      'ps',
+      '--filter',
+      'name=zeytin-livekit',
+      '--format',
+      '{{.Names}}',
+    ]);
+    if (runningCheck.stdout.toString().trim().isEmpty) {
+      print('$_kYellow[LIVEKIT] Container stopped. Starting...$_kReset');
+      await Process.run('docker', ['start', 'zeytin-livekit']);
+      print('$_kGreen[LIVEKIT] Started.$_kReset');
+    } else {
+      print('$_kGreen[LIVEKIT] Already running.$_kReset');
+    }
+  } else {
+    print('$_kYellow[LIVEKIT] Not found. Skipping.$_kReset');
+  }
 }
 
 Future<void> _setupNginx() async {

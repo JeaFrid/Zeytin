@@ -7,6 +7,7 @@ import 'package:zeytin/html/hello_world.dart';
 import 'package:zeytin/logic/engine.dart';
 import 'package:zeytin/logic/gatekeeper.dart';
 import 'package:zeytin/routes/account.dart';
+import 'package:zeytin/routes/call.dart';
 import 'package:zeytin/routes/crud.dart';
 import 'package:zeytin/routes/storage.dart';
 import 'package:zeytin/routes/token.dart';
@@ -28,9 +29,35 @@ void main() async {
   tokenRoutes(zeytin, router);
   storageRoutes(zeytin, router);
   watchRoutes(zeytin, router);
+  callRoutes(zeytin, router);
 
   final handler = Pipeline()
       .addMiddleware(logRequests())
+      .addMiddleware((innerHandler) {
+        return (request) async {
+          if (request.method == 'OPTIONS') {
+            return Response.ok(
+              '',
+              headers: {
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods':
+                    'GET, POST, PUT, DELETE, OPTIONS',
+                'Access-Control-Allow-Headers':
+                    'Origin, Content-Type, X-Auth-Token, Authorization',
+              },
+            );
+          }
+          final response = await innerHandler(request);
+          return response.change(
+            headers: {
+              'Access-Control-Allow-Origin': '*',
+              'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+              'Access-Control-Allow-Headers':
+                  'Origin, Content-Type, X-Auth-Token, Authorization',
+            },
+          );
+        };
+      })
       .addMiddleware(handleErrorsMiddleware(zeytinError))
       .addMiddleware(jsonResponseMiddleware())
       .addMiddleware(gatekeeperMiddleware())
@@ -55,6 +82,10 @@ Middleware gatekeeperMiddleware() {
 Middleware handleErrorsMiddleware(Zeytin zeytinError) {
   return (innerHandler) {
     return (request) async {
+      if (request.headers['upgrade']?.toLowerCase() == 'websocket') {
+        return innerHandler(request);
+      }
+
       try {
         return await innerHandler(request);
       } catch (e, stackTrace) {
@@ -62,6 +93,7 @@ Middleware handleErrorsMiddleware(Zeytin zeytinError) {
         print("Error Code: $code");
         print("Exception: $e");
         print("StackTrace: $stackTrace");
+
         await zeytinError.put(
           truckId: "system",
           boxId: "errors",
@@ -73,6 +105,7 @@ Middleware handleErrorsMiddleware(Zeytin zeytinError) {
             "createdAt": DateTime.now().toIso8601String(),
           },
         );
+
         return Response.internalServerError(
           body: jsonEncode({
             "isSuccess": false,

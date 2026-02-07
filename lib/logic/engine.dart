@@ -381,6 +381,39 @@ class Truck {
     }
   }
 
+  Future<Map<String, dynamic>?> _readInternal(String bId, String t) async {
+    final key = '$bId:$t';
+    if (_hotCache.containsKey(key)) return _hotCache[key];
+    final c = _cache.get(key);
+    if (c != null) {
+      _updateHot(key, c);
+      return c;
+    }
+    final addr = _index.get(bId, t);
+    if (addr == null) return null;
+    _reader ??= await _dataFile.open(mode: FileMode.read);
+
+    await _reader!.setPosition(addr[0]);
+    final block = await _reader!.read(addr[1]);
+    final blockReader = ByteData.view(block.buffer);
+    int offset = 1;
+    final boxIdLen = blockReader.getUint32(offset, Endian.little);
+    offset += 4 + boxIdLen;
+    final tagLen = blockReader.getUint32(offset, Endian.little);
+    offset += 4 + tagLen;
+    final dataLen = blockReader.getUint32(offset, Endian.little);
+    offset += 4;
+    final dataBytes = block.sublist(offset, offset + dataLen);
+    try {
+      final data = BinaryEncoder.decodeValue(dataBytes);
+      _cache.put(key, data);
+      _updateHot(key, data);
+      return data;
+    } catch (e) {
+      return null;
+    }
+  }
+
   Future<void> _rebuildSearchIndex() async {
     final boxes = _index._index.keys;
     for (var bId in boxes) {
@@ -555,47 +588,23 @@ class Truck {
 
   Future<Map<String, dynamic>?> read(String bId, String t) {
     return _synchronized(() async {
-      final key = '$bId:$t';
-      if (_hotCache.containsKey(key)) return _hotCache[key];
-      final c = _cache.get(key);
-      if (c != null) {
-        _updateHot(key, c);
-        return c;
-      }
-      final addr = _index.get(bId, t);
-      if (addr == null) return null;
-      _reader ??= await _dataFile.open(mode: FileMode.read);
-      await _reader!.setPosition(addr[0]);
-      final block = await _reader!.read(addr[1]);
-      final blockReader = ByteData.view(block.buffer);
-      int offset = 1;
-      final boxIdLen = blockReader.getUint32(offset, Endian.little);
-      offset += 4 + boxIdLen;
-      final tagLen = blockReader.getUint32(offset, Endian.little);
-      offset += 4 + tagLen;
-      final dataLen = blockReader.getUint32(offset, Endian.little);
-      offset += 4;
-      final dataBytes = block.sublist(offset, offset + dataLen);
-      try {
-        final data = BinaryEncoder.decodeValue(dataBytes);
-        _cache.put(key, data);
-        _updateHot(key, data);
-        return data;
-      } catch (e) {
-        return null;
-      }
+      return await _readInternal(bId, t);
     });
   }
 
-  Future<Map<String, Map<String, dynamic>>> readBox(String bId) async {
-    final res = <String, Map<String, dynamic>>{};
-    final box = _index.getBox(bId);
-    if (box == null) return res;
-    for (var t in box.keys) {
-      final d = await read(bId, t);
-      if (d != null) res[t] = d;
-    }
-    return res;
+  Future<Map<String, Map<String, dynamic>>> readBox(String bId) {
+    return _synchronized(() async {
+      final res = <String, Map<String, dynamic>>{};
+      final box = _index.getBox(bId);
+      if (box == null) return res;
+      for (var t in box.keys) {
+        final data = await _readInternal(bId, t);
+        if (data != null) {
+          res[t] = data;
+        }
+      }
+      return res;
+    });
   }
 
   void _updateHot(String k, Map<String, dynamic> v) {
@@ -613,7 +622,7 @@ class Truck {
       for (var bId in boxes) {
         final tags = _index._index[bId]?.keys.toList() ?? [];
         for (var tag in tags) {
-          final data = await read(bId, tag);
+          final data = await _readInternal(bId, tag);
           if (data != null) {
             final bytes = BinaryEncoder.encode(bId, tag, data);
             sink.add(bytes);
@@ -701,6 +710,12 @@ class TruckIsolate {
     await _truck.close();
   }
 
+  Future<void> removeTag(String boxId, String tag) async {
+    _truck._index._index[boxId]?.remove(tag);
+    _truck._cache.remove('$boxId:$tag');
+    await _truck._index.save();
+  }
+
   Future<bool> contains(String boxId, String tag) async {
     return await _truck.read(boxId, tag) != null;
   }
@@ -739,6 +754,10 @@ class TruckProxy {
       }
     });
     await completer.future;
+  }
+
+  Future<void> removeTag(String boxId, String tag) async {
+    return await _sendCommand('removeTag', {'boxId': boxId, 'tag': tag});
   }
 
   static void _startTruckIsolate(SendPort sendPort) {
@@ -797,6 +816,13 @@ class TruckProxy {
                 filter:
                     params['filter'] as bool Function(Map<String, dynamic>)?,
               );
+              break;
+            case 'removeTag':
+              await truckIsolate.removeTag(
+                params['boxId'] as String,
+                params['tag'] as String,
+              );
+              result = null;
               break;
             case 'compact':
               await truckIsolate.compact();
@@ -933,6 +959,8 @@ class Zeytin {
     required String tag,
   }) async {
     final key = _generateCacheKey(truckId: truckId, boxId: boxId, tag: tag);
+    final truck = await _resolveTruck(truckId: truckId);
+    await truck.removeTag(boxId, tag);
     _memoryCache.remove(key);
     _changeController.add({
       "truckId": truckId,
@@ -1007,8 +1035,11 @@ class Zeytin {
     required String tag,
     required Map<String, dynamic> value,
   }) async {
+    bool isUpdate = await existsTag(truckId: truckId, boxId: boxId, tag: tag);
+
     final truck = await _resolveTruck(truckId: truckId);
     await truck.write(boxId, tag, value);
+
     _memoryCache.put(
       _generateCacheKey(truckId: truckId, boxId: boxId, tag: tag),
       value,
@@ -1017,7 +1048,7 @@ class Zeytin {
       "truckId": truckId,
       "boxId": boxId,
       "tag": tag,
-      "op": "PUT",
+      "op": isUpdate ? "UPDATE" : "PUT",
       "value": value,
     });
   }

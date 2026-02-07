@@ -24,6 +24,48 @@ git clone https://github.com/JeaFrid/Zeytin.git || true
 cd Zeytin
 dart pub get
 
+echo -e "\n${YELLOW}>>> Do you want to enable Live Streaming & Calls (Installs Docker + LiveKit)? (y/n)${NC}"
+read -p "Choice: " INSTALL_LIVEKIT
+
+if [[ "$INSTALL_LIVEKIT" == "y" ]]; then
+    echo -e "${CYAN}Checking/Installing Docker...${NC}"
+    
+    if ! command -v docker &> /dev/null; then
+        sudo apt-get install -y ca-certificates curl gnupg
+        sudo install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        sudo chmod a+r /etc/apt/keyrings/docker.gpg
+        echo \
+          "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+          "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" | \
+          sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+        sudo apt-get update -y
+        sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+        sudo usermod -aG docker $USER
+    fi
+
+    LK_API_KEY="api$(openssl rand -hex 8)"
+    LK_SECRET="sec$(openssl rand -hex 16)"
+    PUBLIC_IP=$(curl -s ifconfig.me)
+    echo -e "${CYAN}Deploying LiveKit Container...${NC}"
+    sudo docker run -d --name zeytin-livekit \
+        --restart unless-stopped \
+        -p 7880:7880 \
+        -p 7881:7881 \
+        -p 7882:7882/udp \
+        -e LIVEKIT_KEYS="${LK_API_KEY}: ${LK_SECRET}" \
+        livekit/livekit-server --dev --bind 0.0.0.0
+
+    echo -e "${GREEN}LiveKit deployed locally!${NC}"
+    CONFIG_FILE="lib/config.dart"
+    sed -i "s|static String liveKitUrl = \"\";|static String liveKitUrl = \"ws://${PUBLIC_IP}:7880\";|" $CONFIG_FILE
+    sed -i "s|static String liveKitApiKey = \"\";|static String liveKitApiKey = \"${LK_API_KEY}\";|" $CONFIG_FILE
+    sed -i "s|static String liveKitSecretKey = \"\";|static String liveKitSecretKey = \"${LK_SECRET}\";|" $CONFIG_FILE
+
+    echo -e "${GREEN}Zeytin configuration updated with LiveKit credentials!${NC}"
+fi
+
+
 echo -e "\n${YELLOW}>>> Do you want to install and configure Nginx with SSL (Certbot via venv)? (y/n)${NC}"
 read -p "Choice: " INSTALL_NGINX
 

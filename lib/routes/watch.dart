@@ -27,7 +27,11 @@ void watchRoutes(Zeytin zeytin, Router router) {
       final tokener = ZeytinTokener(password);
 
       final subscription = zeytin.changes.listen((change) {
-        // Sadece bu kullanıcıya ait TRUCK ve seçtiği BOX ise gönder
+        print(
+          "WATCH DEBUG: Change detected in truck: ${change["truckId"]}, box: ${change["boxId"]}",
+        );
+        print("WATCH DEBUG: Expecting truck: $truckId, box: $boxId");
+
         if (change["truckId"] == truckId && change["boxId"] == boxId) {
           final payload = {
             "op": change["op"],
@@ -40,6 +44,7 @@ void watchRoutes(Zeytin zeytin, Router router) {
                 : null,
           };
           webSocket.sink.add(jsonEncode(payload));
+          print("WATCH DEBUG: Data sent to WebSocket!");
         }
       });
 

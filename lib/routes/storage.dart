@@ -69,10 +69,8 @@ void storageRoutes(Zeytin zeytin, Router router) {
         ).firstMatch(contentDisposition);
         final fileName = match?.group(1) ?? "unnamed_file";
         final extension = p.extension(fileName).toLowerCase();
-        final safeName = fileName.replaceAll(RegExp(r'[^\w\-. ]'), '');
-        if (safeName != fileName ||
-            fileName.contains('..') ||
-            !fileName.contains('.')) {
+
+        if (fileName.contains('..') || !fileName.contains('.')) {
           return Response.forbidden(
             jsonEncode(
               ZeytinResponse(
@@ -83,6 +81,7 @@ void storageRoutes(Zeytin zeytin, Router router) {
             ),
           );
         }
+
         if (forbiddenExtensions.contains(extension)) {
           return Response.forbidden(
             jsonEncode(
@@ -111,7 +110,7 @@ void storageRoutes(Zeytin zeytin, Router router) {
             ZeytinResponse(
               isSuccess: true,
               message: "Oki doki!",
-              data: {"url": "/$truckId/$fileName"},
+              data: {"url": "/$truckId/$fileName", "id": fileName},
             ).toMap(),
           ),
         );
