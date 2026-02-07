@@ -369,7 +369,6 @@ class Truck {
   Future<T> _synchronized<T>(Future<T> Function() action) async {
     await _lock;
     final completer = Completer<T>();
-    // ignore: body_might_complete_normally_catch_error
     _lock = completer.future.catchError((_) {});
     try {
       final result = await action();
@@ -580,7 +579,6 @@ class Truck {
   void _autoSave() {
     _isSavingIndex = true;
     _dirtyCount = 0;
-    // ignore: body_might_complete_normally_catch_error
     _index.save().then((_) => _isSavingIndex = false).catchError((_) {
       _isSavingIndex = false;
     });

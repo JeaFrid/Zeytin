@@ -15,6 +15,7 @@ include: package:lints/recommended.yaml
 analyzer:
   errors:
     depend_on_referenced_packages: ignore
+    body_might_complete_normally_catch_error: ignore
 
 # Uncomment the following section to specify additional rules.
 
