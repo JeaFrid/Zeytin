@@ -11,7 +11,7 @@ clear
 
 get_free_port() {
     local port=$1
-    while netstat -atn | grep -q ":$port "; do
+    while (netstat -atn | grep -q ":$port ") || (command -v docker &> /dev/null && docker ps --format '{{.Ports}}' | grep -q ":$port->"); do
         port=$((port + 1))
     done
     echo $port
@@ -33,14 +33,12 @@ cd Zeytin
 dart pub get
 
 ZEYTIN_PORT=$(get_free_port 12852)
-echo -e "${GREEN}Detected free port for Zeytin: $ZEYTIN_PORT${NC}"
+echo -e "${GREEN}Selected Port for Zeytin: $ZEYTIN_PORT${NC}"
 
-echo -e "\n${YELLOW}>>> Do you want to enable Live Streaming & Calls (Installs Docker + LiveKit)? (y/n)${NC}"
+echo -e "\n${YELLOW}>>> Do you want to enable Live Streaming & Calls? (y/n)${NC}"
 read -p "Choice: " INSTALL_LIVEKIT
 
 if [[ "$INSTALL_LIVEKIT" == "y" ]]; then
-    echo -e "${CYAN}Checking/Installing Docker...${NC}"
-    
     if ! command -v docker &> /dev/null; then
         sudo apt-get install -y ca-certificates curl gnupg
         sudo install -m 0755 -d /etc/apt/keyrings
@@ -54,38 +52,34 @@ if [[ "$INSTALL_LIVEKIT" == "y" ]]; then
 
     LK_HTTP_PORT=$(get_free_port 7880)
     LK_TCP_PORT=$(get_free_port 7881)
-    LK_NAME="zeytin-livekit-$(openssl rand -hex 3)"
+    LK_UDP_PORT=$(get_free_port 7882)
     LK_API_KEY="api$(openssl rand -hex 8)"
     LK_SECRET="sec$(openssl rand -hex 16)"
+    LK_NAME="zeytin-livekit-$(openssl rand -hex 3)"
     PUBLIC_IP=$(curl -s ifconfig.me)
 
-    echo -e "${CYAN}Deploying LiveKit Container ($LK_NAME)...${NC}"
     sudo docker run -d --name "$LK_NAME" \
         --restart unless-stopped \
         -p "$LK_HTTP_PORT":7880 \
         -p "$LK_TCP_PORT":7881 \
-        -p 7882:7882/udp \
+        -p "$LK_UDP_PORT":7882/udp \
         -e LIVEKIT_KEYS="${LK_API_KEY}: ${LK_SECRET}" \
         livekit/livekit-server --dev --bind 0.0.0.0
 
-    echo -e "${GREEN}LiveKit deployed!${NC}"
-    CONFIG_FILE="lib/config.dart"
-    sed -i "s|static int serverPort = .*|static int serverPort = $ZEYTIN_PORT;|" $CONFIG_FILE
-    sed -i "s|static String liveKitUrl = .*|static String liveKitUrl = \"ws://${PUBLIC_IP}:${LK_HTTP_PORT}\";|" $CONFIG_FILE
-    sed -i "s|static String liveKitApiKey = .*|static String liveKitApiKey = \"${LK_API_KEY}\";|" $CONFIG_FILE
-    sed -i "s|static String liveKitSecretKey = .*|static String liveKitSecretKey = \"${LK_SECRET}\";|" $CONFIG_FILE
+    sed -i "s|static int serverPort = .*|static int serverPort = $ZEYTIN_PORT;|" lib/config.dart
+    sed -i "s|static String liveKitUrl = .*|static String liveKitUrl = \"ws://${PUBLIC_IP}:${LK_HTTP_PORT}\";|" lib/config.dart
+    sed -i "s|static String liveKitApiKey = .*|static String liveKitApiKey = \"${LK_API_KEY}\";|" lib/config.dart
+    sed -i "s|static String liveKitSecretKey = .*|static String liveKitSecretKey = \"${LK_SECRET}\";|" lib/config.dart
 fi
 
-echo -e "\n${YELLOW}>>> Do you want to install and configure Nginx with SSL (Certbot via venv)? (y/n)${NC}"
+echo -e "\n${YELLOW}>>> Do you want to install and configure Nginx with SSL? (y/n)${NC}"
 read -p "Choice: " INSTALL_NGINX
 
 if [[ "$INSTALL_NGINX" == "y" ]]; then
-    read -p "Enter your Domain (e.g. api.example.com): " DOMAIN_NAME
-    read -p "Enter your Email for SSL Alerts: " EMAIL_ADDR
-    
+    read -p "Enter your Domain: " DOMAIN_NAME
+    read -p "Enter your Email: " EMAIL_ADDR
     NGINX_CONF="/etc/nginx/sites-available/zeytin-$ZEYTIN_PORT"
     
-    echo -e "${CYAN}Writing Nginx configuration...${NC}"
     sudo bash -c "cat > $NGINX_CONF <<EOF
 server {
     listen 80;
@@ -107,18 +101,13 @@ server {
     }
 }
 EOF"
-
     sudo ln -sf $NGINX_CONF /etc/nginx/sites-enabled/
     sudo nginx -t
     sudo systemctl restart nginx
-
-    sudo mkdir -p /opt/certbot
     sudo python3 -m venv /opt/certbot/venv
     sudo /opt/certbot/venv/bin/pip install --upgrade pip
     sudo /opt/certbot/venv/bin/pip install certbot certbot-nginx
-
     sudo /opt/certbot/venv/bin/certbot --nginx -d $DOMAIN_NAME --non-interactive --agree-tos -m $EMAIL_ADDR --redirect
-    sudo ln -sf /opt/certbot/venv/bin/certbot /usr/bin/certbot || true
 fi
 
-echo -e "\n${GREEN}INSTALLATION COMPLETE! Port: $ZEYTIN_PORT. Run: dart server/runner.dart${NC}"
+echo -e "\n${GREEN}INSTALLATION COMPLETE! Run: dart server/runner.dart${NC}"
