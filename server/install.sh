@@ -48,6 +48,10 @@ if [[ "$INSTALL_LIVEKIT" == "y" ]]; then
     LK_SECRET="sec$(openssl rand -hex 16)"
     PUBLIC_IP=$(curl -s ifconfig.me)
     echo -e "${CYAN}Deploying LiveKit Container...${NC}"
+    if [ "$(sudo docker ps -aq -f name=zeytin-livekit)" ]; then
+        echo -e "${YELLOW}Removing existing (old) Zeytin LiveKit container...${NC}"
+        sudo docker rm -f zeytin-livekit
+    fi
     sudo docker run -d --name zeytin-livekit \
         --restart unless-stopped \
         -p 12133:7880 \
@@ -59,9 +63,8 @@ if [[ "$INSTALL_LIVEKIT" == "y" ]]; then
     echo -e "${GREEN}LiveKit deployed locally!${NC}"
     CONFIG_FILE="lib/config.dart"
     sed -i "s|static String liveKitUrl = \".*\";|static String liveKitUrl = \"ws://${PUBLIC_IP}:12133\";|" $CONFIG_FILE
-    sed -i "s|static String liveKitApiKey = \"\";|static String liveKitApiKey = \"${LK_API_KEY}\";|" $CONFIG_FILE
-    sed -i "s|static String liveKitSecretKey = \"\";|static String liveKitSecretKey = \"${LK_SECRET}\";|" $CONFIG_FILE
-
+    sed -i "s|static String liveKitApiKey = \".*\";|static String liveKitApiKey = \"${LK_API_KEY}\";|" $CONFIG_FILE
+    sed -i "s|static String liveKitSecretKey = \".*\";|static String liveKitSecretKey = \"${LK_SECRET}\";|" $CONFIG_FILE
     echo -e "${GREEN}Zeytin configuration updated with LiveKit credentials!${NC}"
 fi
 
