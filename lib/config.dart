@@ -1,4 +1,5 @@
 class ZeytinConfig {
+  static int serverPort = 12852;
   static const int maxTruckCount = 20;
   static const int maxTruckPerIp = 20;
   static const int truckCreationCooldownMs = 600000;

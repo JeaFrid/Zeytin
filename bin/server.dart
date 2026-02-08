@@ -1,8 +1,10 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart';
 import 'package:shelf_router/shelf_router.dart';
 import 'package:uuid/uuid.dart';
+import 'package:zeytin/config.dart';
 import 'package:zeytin/html/hello_world.dart';
 import 'package:zeytin/logic/engine.dart';
 import 'package:zeytin/logic/gatekeeper.dart';
@@ -24,6 +26,7 @@ void main() async {
   router.get('/github', (Request request) {
     return Response.found('https://github.com/JeaFrid/zeytin');
   });
+
   accountRoutes(zeytin, router);
   crudRoutes(zeytin, router);
   tokenRoutes(zeytin, router);
@@ -63,7 +66,11 @@ void main() async {
       .addMiddleware(gatekeeperMiddleware())
       .addHandler(router.call);
 
-  final server = await serve(handler, '0.0.0.0', 12852);
+  // Dynamic port priority: Env > Config
+  final int port = int.parse(
+    Platform.environment['ZEYTIN_PORT'] ?? ZeytinConfig.serverPort.toString(),
+  );
+  final server = await serve(handler, '0.0.0.0', port);
   print('The Zeytin server has started on port ${server.port}! Have fun!');
 }
 

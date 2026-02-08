@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'dart:async';
 
+import 'package:zeytin/config.dart';
+
 const String _kReset = '\x1B[0m';
 const String _kBold = '\x1B[1m';
 const String _kRed = '\x1B[31m';
@@ -88,7 +90,9 @@ void main() async {
 }
 
 Future<void> _startTestMode() async {
-  print('\n$_kGreen[TEST] Starting JIT...$_kReset');
+  print(
+    '\n$_kGreen[TEST] Starting JIT on port ${ZeytinConfig.serverPort}...$_kReset',
+  );
   var process = await Process.start(
     'dart',
     ['bin/server.dart'],
@@ -116,7 +120,9 @@ Future<void> _startLiveMode() async {
 
   var shellCmd = 'nohup ./$binaryPath > $logFile 2>&1 & echo \$! > $pidFile';
   await Process.run('bash', ['-c', shellCmd], workingDirectory: root);
-  print('$_kGreen[SUCCESS] Server started in background.$_kReset');
+  print(
+    '$_kGreen[SUCCESS] Server started in background on port ${ZeytinConfig.serverPort}.$_kReset',
+  );
 }
 
 Future<void> _stopServer() async {
@@ -161,7 +167,7 @@ Future<void> _updateSystem() async {
   ], workingDirectory: root);
 
   if (gitRes.exitCode != 0) {
-    print('$_kRed[ERROR] Git pull failed. Make sure it is a git repo.$_kReset');
+    print('$_kRed[ERROR] Git pull failed.$_kReset');
   } else {
     print('$_kGreen[SUCCESS] Files updated.$_kReset');
   }
@@ -179,10 +185,6 @@ Future<void> _updateSystem() async {
     workingDirectory: root,
   );
   await pubRes.exitCode;
-
-  print(
-    '\n$_kGreen[COMPLETE] System updated. Please restart the server.$_kReset',
-  );
 }
 
 Future<void> _uninstallSystem() async {
@@ -201,16 +203,13 @@ Future<void> _uninstallSystem() async {
       '''
 #!/bin/bash
 sleep 1
-echo "Self-destructing..."
 rm -rf "$root"
-echo "Zeytin has been removed. Goodbye."
+echo "Zeytin removed."
 ''';
 
   final scriptFile = File('/tmp/zeytin_uninstall.sh');
   await scriptFile.writeAsString(destroyer);
   await Process.run('chmod', ['+x', scriptFile.path]);
-
-  print('$_kRed[BYE] Deleting system in 1 second...$_kReset');
   await Process.start('bash', [
     scriptFile.path,
   ], mode: ProcessStartMode.detached);
@@ -224,11 +223,9 @@ Future<void> _cleanDatabase() async {
   final root = _getProjectRoot();
   var dbDir = Directory('$root/zeytin');
   var dbErrDir = Directory('$root/zeytin_err');
-
   if (dbDir.existsSync()) dbDir.deleteSync(recursive: true);
   if (dbErrDir.existsSync()) dbErrDir.deleteSync(recursive: true);
-
-  print('$_kRed[CLEAN] Database and error folders removed.$_kReset');
+  print('$_kRed[CLEAN] Database removed.$_kReset');
 }
 
 Future<void> _checkAndManageLiveKit() async {
@@ -236,44 +233,29 @@ Future<void> _checkAndManageLiveKit() async {
   try {
     var checkDocker = await Process.run('docker', ['--version']);
     if (checkDocker.exitCode != 0) return;
-  } catch (e) {
-    return;
-  }
-  var containerCheck = await Process.run('docker', [
-    'ps',
-    '-a',
-    '--filter',
-    'name=zeytin-livekit',
-    '--format',
-    '{{.Names}}',
-  ]);
 
-  if (containerCheck.stdout.toString().trim() == 'zeytin-livekit') {
-    var runningCheck = await Process.run('docker', [
+    // Check if any zeytin-livekit container exists
+    var containerCheck = await Process.run('docker', [
       'ps',
+      '-a',
       '--filter',
       'name=zeytin-livekit',
       '--format',
       '{{.Names}}',
     ]);
-    if (runningCheck.stdout.toString().trim().isEmpty) {
-      print('$_kYellow[LIVEKIT] Container stopped. Starting...$_kReset');
-      await Process.run('docker', ['start', 'zeytin-livekit']);
-      print('$_kGreen[LIVEKIT] Started.$_kReset');
-    } else {
-      print('$_kGreen[LIVEKIT] Already running.$_kReset');
+    if (containerCheck.stdout.toString().trim().isNotEmpty) {
+      String name = containerCheck.stdout.toString().split('\n').first.trim();
+      await Process.run('docker', ['start', name]);
+      print('$_kGreen[LIVEKIT] Container $name started.$_kReset');
     }
-  } else {
-    print('$_kYellow[LIVEKIT] Not found. Skipping.$_kReset');
+  } catch (e) {
+    print('Docker not available.');
   }
 }
 
 Future<void> _setupNginx() async {
   final installScript = File('${_getProjectRoot()}/server/install.sh');
-  if (!installScript.existsSync()) {
-    print('$_kRed[ERROR] install.sh not found!$_kReset');
-    return;
-  }
+  if (!installScript.existsSync()) return;
   var process = await Process.start(
     'bash',
     [installScript.path],
@@ -284,21 +266,23 @@ Future<void> _setupNginx() async {
 }
 
 Future<void> _removeNginx() async {
-  stdout.write('Confirm removing Nginx config for Zeytin? (y/n): ');
+  stdout.write('Confirm removing Nginx config? (y/n): ');
   if (stdin.readLineSync()?.toLowerCase() != 'y') return;
-
-  await Process.run('sudo', ['rm', '/etc/nginx/sites-available/zeytin']);
-  await Process.run('sudo', ['rm', '/etc/nginx/sites-enabled/zeytin']);
+  await Process.run('sudo', [
+    'rm',
+    '/etc/nginx/sites-available/zeytin-${ZeytinConfig.serverPort}',
+  ]);
+  await Process.run('sudo', [
+    'rm',
+    '/etc/nginx/sites-enabled/zeytin-${ZeytinConfig.serverPort}',
+  ]);
   await Process.run('sudo', ['systemctl', 'restart', 'nginx']);
-
-  print('$_kGreen[SUCCESS] Nginx configuration removed.$_kReset');
+  print('$_kGreen[SUCCESS] Nginx config removed.$_kReset');
 }
 
 String _getProjectRoot() {
   final scriptPath = Platform.script.toFilePath();
   final currentDir = Directory(scriptPath).parent.path;
-  if (currentDir.endsWith('server')) {
-    return Directory(currentDir).parent.path;
-  }
+  if (currentDir.endsWith('server')) return Directory(currentDir).parent.path;
   return currentDir;
 }
