@@ -9,14 +9,6 @@ NC='\033[0m'
 set -e
 clear
 
-get_free_port() {
-    local port=$1
-    while (netstat -atn | grep -q ":$port ") || (command -v docker &> /dev/null && docker ps --format '{{.Ports}}' | grep -q ":$port->"); do
-        port=$((port + 1))
-    done
-    echo $port
-}
-
 echo -e "${CYAN}>>> Zeytin & Nginx Auto-Installer${NC}"
 
 sudo apt-get update -y
@@ -32,42 +24,40 @@ git clone https://github.com/JeaFrid/Zeytin.git || true
 cd Zeytin
 dart pub get
 
-ZEYTIN_PORT=$(get_free_port 12852)
-echo -e "${GREEN}Selected Port for Zeytin: $ZEYTIN_PORT${NC}"
+ZEYTIN_PORT=12133
+echo -e "${GREEN}Server port locked to: $ZEYTIN_PORT${NC}"
 
 echo -e "\n${YELLOW}>>> Do you want to enable Live Streaming & Calls? (y/n)${NC}"
 read -p "Choice: " INSTALL_LIVEKIT
 
 if [[ "$INSTALL_LIVEKIT" == "y" ]]; then
     if ! command -v docker &> /dev/null; then
-        sudo apt-get install -y ca-certificates curl gnupg
+        sudo apt-get install -y ca-certificates gnupg
         sudo install -m 0755 -d /etc/apt/keyrings
         curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
         sudo chmod a+r /etc/apt/keyrings/docker.gpg
         echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-        sudo apt-get update -y
-        sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-        sudo usermod -aG docker $USER
+        sudo apt-get update -y && sudo apt-get install -y docker-ce docker-ce-cli containerd.io
     fi
 
-    LK_HTTP_PORT=$(get_free_port 7880)
-    LK_TCP_PORT=$(get_free_port 7881)
-    LK_UDP_PORT=$(get_free_port 7882)
+    echo -e "${CYAN}Handling LiveKit Container...${NC}"
+    sudo docker stop zeytin-livekit || true
+    sudo docker rm zeytin-livekit || true
+
     LK_API_KEY="api$(openssl rand -hex 8)"
     LK_SECRET="sec$(openssl rand -hex 16)"
-    LK_NAME="zeytin-livekit-$(openssl rand -hex 3)"
     PUBLIC_IP=$(curl -s ifconfig.me)
 
-    sudo docker run -d --name "$LK_NAME" \
+    sudo docker run -d --name zeytin-livekit \
         --restart unless-stopped \
-        -p "$LK_HTTP_PORT":7880 \
-        -p "$LK_TCP_PORT":7881 \
-        -p "$LK_UDP_PORT":7882/udp \
+        -p 7880:7880 \
+        -p 7881:7881 \
+        -p 7882:7882/udp \
         -e LIVEKIT_KEYS="${LK_API_KEY}: ${LK_SECRET}" \
         livekit/livekit-server --dev --bind 0.0.0.0
 
     sed -i "s|static int serverPort = .*|static int serverPort = $ZEYTIN_PORT;|" lib/config.dart
-    sed -i "s|static String liveKitUrl = .*|static String liveKitUrl = \"ws://${PUBLIC_IP}:${LK_HTTP_PORT}\";|" lib/config.dart
+    sed -i "s|static String liveKitUrl = .*|static String liveKitUrl = \"ws://${PUBLIC_IP}:7880\";|" lib/config.dart
     sed -i "s|static String liveKitApiKey = .*|static String liveKitApiKey = \"${LK_API_KEY}\";|" lib/config.dart
     sed -i "s|static String liveKitSecretKey = .*|static String liveKitSecretKey = \"${LK_SECRET}\";|" lib/config.dart
 fi
@@ -78,7 +68,7 @@ read -p "Choice: " INSTALL_NGINX
 if [[ "$INSTALL_NGINX" == "y" ]]; then
     read -p "Enter your Domain: " DOMAIN_NAME
     read -p "Enter your Email: " EMAIL_ADDR
-    NGINX_CONF="/etc/nginx/sites-available/zeytin-$ZEYTIN_PORT"
+    NGINX_CONF="/etc/nginx/sites-available/zeytin"
     
     sudo bash -c "cat > $NGINX_CONF <<EOF
 server {

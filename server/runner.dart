@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'dart:async';
-
 import 'package:zeytin/config.dart';
 
 const String _kReset = '\x1B[0m';
@@ -152,31 +151,26 @@ Future<void> _watchLogs() async {
 Future<void> _updateSystem() async {
   print('\n$_kCyan[UPDATE] Starting system update...$_kReset');
   final root = _getProjectRoot();
-
   print('[@] Backing up local configs...');
   final hasConfig = await File('$root/lib/config.dart').exists();
   if (hasConfig) {
     await File('$root/lib/config.dart').copy('/tmp/zeytin_config.bak');
   }
-
   print('[@] Pulling latest changes from Git...');
   var gitRes = await Process.run('git', [
     'pull',
     'origin',
     'main',
   ], workingDirectory: root);
-
   if (gitRes.exitCode != 0) {
     print('$_kRed[ERROR] Git pull failed.$_kReset');
   } else {
     print('$_kGreen[SUCCESS] Files updated.$_kReset');
   }
-
   if (hasConfig) {
     await File('/tmp/zeytin_config.bak').copy('$root/lib/config.dart');
     print('[@] Local config.dart restored.');
   }
-
   print('[@] Updating Dart dependencies...');
   var pubRes = await Process.start(
     'dart',
@@ -195,18 +189,10 @@ Future<void> _uninstallSystem() async {
     print('Aborted.');
     return;
   }
-
   await _stopServer();
   final root = _getProjectRoot();
-
   final destroyer =
-      '''
-#!/bin/bash
-sleep 1
-rm -rf "$root"
-echo "Zeytin removed."
-''';
-
+      '#!/bin/bash\nsleep 1\nrm -rf "$root"\necho "Zeytin removed."\n';
   final scriptFile = File('/tmp/zeytin_uninstall.sh');
   await scriptFile.writeAsString(destroyer);
   await Process.run('chmod', ['+x', scriptFile.path]);
@@ -233,8 +219,6 @@ Future<void> _checkAndManageLiveKit() async {
   try {
     var checkDocker = await Process.run('docker', ['--version']);
     if (checkDocker.exitCode != 0) return;
-
-    // Check if any zeytin-livekit container exists
     var containerCheck = await Process.run('docker', [
       'ps',
       '-a',
@@ -244,9 +228,8 @@ Future<void> _checkAndManageLiveKit() async {
       '{{.Names}}',
     ]);
     if (containerCheck.stdout.toString().trim().isNotEmpty) {
-      String name = containerCheck.stdout.toString().split('\n').first.trim();
-      await Process.run('docker', ['start', name]);
-      print('$_kGreen[LIVEKIT] Container $name started.$_kReset');
+      await Process.run('docker', ['start', 'zeytin-livekit']);
+      print('$_kGreen[LIVEKIT] Container zeytin-livekit started.$_kReset');
     }
   } catch (e) {
     print('Docker not available.');
@@ -268,14 +251,8 @@ Future<void> _setupNginx() async {
 Future<void> _removeNginx() async {
   stdout.write('Confirm removing Nginx config? (y/n): ');
   if (stdin.readLineSync()?.toLowerCase() != 'y') return;
-  await Process.run('sudo', [
-    'rm',
-    '/etc/nginx/sites-available/zeytin-${ZeytinConfig.serverPort}',
-  ]);
-  await Process.run('sudo', [
-    'rm',
-    '/etc/nginx/sites-enabled/zeytin-${ZeytinConfig.serverPort}',
-  ]);
+  await Process.run('sudo', ['rm', '/etc/nginx/sites-available/zeytin']);
+  await Process.run('sudo', ['rm', '/etc/nginx/sites-enabled/zeytin']);
   await Process.run('sudo', ['systemctl', 'restart', 'nginx']);
   print('$_kGreen[SUCCESS] Nginx config removed.$_kReset');
 }
