@@ -1,10 +1,8 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart';
 import 'package:shelf_router/shelf_router.dart';
 import 'package:uuid/uuid.dart';
-import 'package:zeytin/config.dart';
 import 'package:zeytin/html/hello_world.dart';
 import 'package:zeytin/logic/engine.dart';
 import 'package:zeytin/logic/gatekeeper.dart';
@@ -26,7 +24,6 @@ void main() async {
   router.get('/github', (Request request) {
     return Response.found('https://github.com/JeaFrid/zeytin');
   });
-
   accountRoutes(zeytin, router);
   crudRoutes(zeytin, router);
   tokenRoutes(zeytin, router);
@@ -66,8 +63,7 @@ void main() async {
       .addMiddleware(gatekeeperMiddleware())
       .addHandler(router.call);
 
-  final int port = ZeytinConfig.serverPort;
-  final server = await serve(handler, '0.0.0.0', port);
+  final server = await serve(handler, '0.0.0.0', 12852);
   print('The Zeytin server has started on port ${server.port}! Have fun!');
 }
 
@@ -89,6 +85,7 @@ Middleware handleErrorsMiddleware(Zeytin zeytinError) {
       if (request.headers['upgrade']?.toLowerCase() == 'websocket') {
         return innerHandler(request);
       }
+
       try {
         return await innerHandler(request);
       } catch (e, stackTrace) {
@@ -96,6 +93,7 @@ Middleware handleErrorsMiddleware(Zeytin zeytinError) {
         print("Error Code: $code");
         print("Exception: $e");
         print("StackTrace: $stackTrace");
+
         await zeytinError.put(
           truckId: "system",
           boxId: "errors",
@@ -107,6 +105,7 @@ Middleware handleErrorsMiddleware(Zeytin zeytinError) {
             "createdAt": DateTime.now().toIso8601String(),
           },
         );
+
         return Response.internalServerError(
           body: jsonEncode({
             "isSuccess": false,
@@ -123,9 +122,11 @@ Middleware jsonResponseMiddleware() {
   return (innerHandler) {
     return (request) async {
       final response = await innerHandler(request);
+
       if (response.headers.containsKey('content-type')) {
         return response;
       }
+
       return response.change(headers: {'content-type': 'application/json'});
     };
   };

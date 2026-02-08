@@ -1,5 +1,4 @@
 class ZeytinConfig {
-  static int serverPort = 12133;
   static const int maxTruckCount = 20;
   static const int maxTruckPerIp = 20;
   static const int truckCreationCooldownMs = 600000;
@@ -10,7 +9,7 @@ class ZeytinConfig {
   static bool sleepModeEnabled = true;
   static List<String> blackList = [];
   static List<String> whiteList = ["127.0.0.1"];
-  static String liveKitUrl = "ws://127.0.0.1:7880";
-  static String liveKitApiKey = "devkey";
-  static String liveKitSecretKey = "secret";
+  static String liveKitUrl = "ws://127.0.0.1:12133";
+  static String liveKitApiKey = "";
+  static String liveKitSecretKey = "";
 }
