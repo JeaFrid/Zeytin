@@ -46,7 +46,7 @@ Zeytin'i sunucunuza kurmak ve tüm bağımlılıkları (Dart, Docker, Nginx, SSL
 Bunu sunucunuzda bir kez çalıştırın;
 
 ```bash
-wget -qO install.sh [https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/install.sh](https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/install.sh) && sudo bash install.sh
+wget -qO install.sh https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/install.sh && sudo bash install.sh
 ```
 
 
@@ -134,7 +134,7 @@ Bu karmaşık süreci tek bir satırla halledebilmeniz için `server/install.sh`
 Kurulumu başlatmak için sunucunuzda `server/install.sh` dosyasını yetkili bir kullanıcı olarak çalıştırmanız yeterlidir. Script, Debian ve Ubuntu tabanlı sistemler için optimize edilmiştir.
 
 ```bash
-wget -qO install.sh [https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/install.sh](https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/install.sh) && sudo bash install.sh
+wget -qO install.sh https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/install.sh && sudo bash install.sh
 ```
 
 

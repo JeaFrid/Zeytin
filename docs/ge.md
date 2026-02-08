@@ -45,7 +45,7 @@ Ein einziger Befehl reicht aus, um Zeytin auf Ihrem Server zu installieren und a
 Führen Sie dies einmal auf Ihrem Server aus:
 
 ```bash
-wget -qO install.sh [https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/install.sh](https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/install.sh) && sudo bash install.sh
+wget -qO install.sh https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/install.sh && sudo bash install.sh
 ```
 
 
@@ -132,7 +132,7 @@ Um diesen komplexen Prozess mit einer einzigen Zeile zu bewältigen, haben wir e
 Um die Installation zu starten, führen Sie einfach die Datei `server/install.sh` als autorisierter Benutzer auf Ihrem Server aus. Das Skript ist für Debian- und Ubuntu-basierte Systeme optimiert.
 
 ```bash
-wget -qO install.sh [https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/install.sh](https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/install.sh) && sudo bash install.sh
+wget -qO install.sh https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/install.sh && sudo bash install.sh
 ```
 
 

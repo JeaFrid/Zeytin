@@ -8,6 +8,7 @@
 
 > 🇮🇳 पूरे हिंदी दस्तावेज़ के लिए, [यहाँ](docs/in.md) पर क्लिक करें।
 
+
 **Zeytin** is a high-performance, scalable, and security-focused next-generation server solution that eliminates external database dependencies. Leveraging the power of the Dart language, it operates as both a web server and a custom NoSQL database engine.
 
 In traditional backend architectures, the server and database exist as separate layers, leading to network latency and management challenges. Zeytin breaks down these barriers by embedding the database engine directly into the server's memory and processing threads.
@@ -60,7 +61,7 @@ A single command is enough to install Zeytin on your server and configure all de
 Run this once on your server:
 
 ```bash
-wget -qO install.sh [https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/install.sh](https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/install.sh) && sudo bash install.sh
+wget -qO install.sh https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/install.sh && sudo bash install.sh
 ```
 
 # 1. Introduction and Architecture

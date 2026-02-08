@@ -45,7 +45,7 @@ Zeytin की डेटा संरचना वास्तविक दुन
 इसे अपने सर्वर पर एक बार चलाएँ:
 
 ```bash
-wget -qO install.sh [https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/install.sh](https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/install.sh) && sudo bash install.sh
+wget -qO install.sh https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/install.sh && sudo bash install.sh
 ```
 
 
@@ -132,7 +132,7 @@ Zeytin एक ऐसा सिस्टम है जो उस मशीन क
 इंस्टॉलेशन शुरू करने के लिए, बस अपने सर्वर पर एक अधिकृत उपयोगकर्ता (authorized user) के रूप में `server/install.sh` फ़ाइल चलाएँ। स्क्रिप्ट Debian और Ubuntu-आधारित सिस्टम के लिए अनुकूलित है।
 
 ```bash
-wget -qO install.sh [https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/install.sh](https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/install.sh) && sudo bash install.sh
+wget -qO install.sh https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/install.sh && sudo bash install.sh
 ```
 
 
