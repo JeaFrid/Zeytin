@@ -730,28 +730,32 @@ class TruckProxy {
   TruckProxy(this.id, this.path);
 
   Future<void> initialize() async {
-    await Isolate.spawn(_startTruckIsolate, _receivePort.sendPort);
     final completer = Completer<void>();
+    await Isolate.spawn(_startTruckIsolate, _receivePort.sendPort);
     _receivePort.listen((message) {
       if (message is SendPort) {
         _sendPort = message;
-        _sendCommand('init', {'id': id, 'path': path}).then((_) {
-          completer.complete();
-        });
+        _sendCommand('init', {'id': id, 'path': path})
+            .then((_) {
+              if (!completer.isCompleted) completer.complete();
+            })
+            .catchError((e) {
+              if (!completer.isCompleted) completer.completeError(e);
+            });
       } else if (message is Map) {
-        final id = message['id'] as int;
-        final completer = _completers[id];
-        if (completer != null) {
+        final msgId = message['id'] as int;
+        final msgCompleter = _completers[msgId];
+        if (msgCompleter != null) {
           if (message.containsKey('result')) {
-            completer.complete(message['result']);
+            msgCompleter.complete(message['result']);
           } else if (message.containsKey('error')) {
-            completer.completeError(Exception(message['error']));
+            msgCompleter.completeError(Exception(message['error']));
           }
-          _completers.remove(id);
+          _completers.remove(msgId);
         }
       }
     });
-    await completer.future;
+    return completer.future;
   }
 
   Future<void> removeTag(String boxId, String tag) async {

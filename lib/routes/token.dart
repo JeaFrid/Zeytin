@@ -6,47 +6,63 @@ import 'package:uuid/uuid.dart';
 import 'package:zeytin/logic/account.dart';
 import 'package:zeytin/logic/engine.dart';
 import 'package:zeytin/models/response.dart';
+import 'package:zeytin/tools/tokener.dart';
 
 List<Map<String, dynamic>> tokens = [];
+List<Map<String, dynamic>> handshakePool = [];
+
+void cleanHandshakePool() {
+  final now = DateTime.now().millisecondsSinceEpoch;
+  handshakePool.removeWhere((element) => now > element['expires']);
+}
+
 void tokenRoutes(Zeytin zeytin, Router router) {
   router.post('/token/create', (Request request) async {
     final payload = await request.readAsString();
-    final data = jsonDecode(payload);
+    final incomingData = jsonDecode(payload);
 
-    final String? email = data['email'];
-    final String? password = data['password'];
+    final String? encryptedPayload = incomingData['data'];
 
-    if (email == null || password == null) {
+    if (encryptedPayload == null) {
       return Response.badRequest(
-        body: jsonEncode(
-          ZeytinResponse(
-            isSuccess: false,
-            message: "Opps...",
-            error:
-                "Email and password parameters are mandatory when making requests to this endpoint.",
-          ).toMap(),
-        ),
+        body: jsonEncode({
+          "isSuccess": false,
+          "message": "Secure payload required.",
+        }),
       );
     }
-    String? myToken = getTokenByCredentials(email, password);
-    if (myToken != null) {
-      bool valid = isTokenValid(myToken);
-      if (valid) {
-        return Response.ok(
-          jsonEncode(
-            ZeytinResponse(
-              isSuccess: true,
-              message: "Oki doki!",
-              data: {"token": myToken},
-            ).toMap(),
-          ),
-        );
-      } else {
-        return await _createToken(zeytin, router, email, password);
+
+    cleanHandshakePool();
+
+    String? decryptedData;
+    for (var handshake in handshakePool) {
+      try {
+        decryptedData = ZeytinTokener(
+          handshake['key'],
+        ).decryptString(encryptedPayload);
+        break;
+      } catch (_) {
+        continue;
       }
-    } else {
-      return await _createToken(zeytin, router, email, password);
     }
+
+    if (decryptedData == null) {
+      return Response.forbidden(
+        jsonEncode({
+          "isSuccess": false,
+          "message": "Invalid or expired handshake key.",
+        }),
+      );
+    }
+
+    final parts = decryptedData.split('|');
+    if (parts.length != 2) {
+      return Response.badRequest(body: "Invalid payload format");
+    }
+
+    final String email = parts[0];
+    final String password = parts[1];
+    return await _createToken(zeytin, router, email, password);
   });
   router.delete('/token/delete', (Request request) async {
     final payload = await request.readAsString();
@@ -88,6 +104,22 @@ void tokenRoutes(Zeytin zeytin, Router router) {
         ),
       );
     }
+  });
+  router.post('/token/handshake', (Request request) async {
+    cleanHandshakePool();
+    String tempKey = Uuid().v4().replaceAll('-', '').substring(0, 32);
+    final now = DateTime.now().millisecondsSinceEpoch;
+
+    handshakePool.add({"key": tempKey, "expires": now + 10000});
+
+    return Response.ok(
+      jsonEncode({
+        "isSuccess": true,
+        "message":
+            "Handshake established. Use this key for the next 10 seconds.",
+        "tempKey": tempKey,
+      }),
+    );
   });
 }
 

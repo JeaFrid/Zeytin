@@ -7,26 +7,70 @@ import 'package:zeytin/logic/gatekeeper.dart';
 import 'package:zeytin/models/response.dart';
 import 'package:zeytin/config.dart';
 import 'package:zeytin/tools/ip.dart';
+import 'package:zeytin/tools/tokener.dart';
+import 'package:zeytin/routes/token.dart';
 
 void accountRoutes(Zeytin zeytin, Router router) {
   router.post('/truck/create', (Request request) async {
     final payload = await request.readAsString();
-    final data = jsonDecode(payload);
+    final incomingData = jsonDecode(payload);
 
-    final String? email = data['email'];
-    final String? password = data['password'];
+    final String? encryptedPayload = incomingData['data'];
 
-    if (email == null || password == null) {
+    if (encryptedPayload == null) {
       return Response.badRequest(
         body: jsonEncode(
           ZeytinResponse(
             isSuccess: false,
             message: "Opss...",
-            error: "Email and password parameters are mandatory.",
+            error: "Secure payload required.",
           ).toMap(),
         ),
       );
     }
+
+    cleanHandshakePool();
+
+    String? decryptedData;
+    for (var handshake in handshakePool) {
+      try {
+        decryptedData = ZeytinTokener(
+          handshake['key'],
+        ).decryptString(encryptedPayload);
+        break;
+      } catch (_) {
+        continue;
+      }
+    }
+
+    if (decryptedData == null) {
+      return Response.forbidden(
+        jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opss...",
+            error: "Invalid or expired handshake key.",
+          ).toMap(),
+        ),
+      );
+    }
+
+    final parts = decryptedData.split('|');
+    if (parts.length != 2) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opss...",
+            error: "Invalid payload format.",
+          ).toMap(),
+        ),
+      );
+    }
+
+    final String email = parts[0];
+    final String password = parts[1];
+
     final String ip = getClientIp(request);
     final activity = Gatekeeper.ipRegistry[ip];
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -60,6 +104,7 @@ void accountRoutes(Zeytin zeytin, Router router) {
         );
       }
     }
+
     if (zeytin.getAllTruck().length >= ZeytinConfig.maxTruckCount) {
       return Response(
         507,
@@ -92,22 +137,63 @@ void accountRoutes(Zeytin zeytin, Router router) {
 
   router.post('/truck/id', (Request request) async {
     final payload = await request.readAsString();
-    final data = jsonDecode(payload);
+    final incomingData = jsonDecode(payload);
 
-    final String? email = data['email'];
-    final String? password = data['password'];
+    final String? encryptedPayload = incomingData['data'];
 
-    if (email == null || password == null) {
+    if (encryptedPayload == null) {
       return Response.badRequest(
         body: jsonEncode(
           ZeytinResponse(
             isSuccess: false,
             message: "Opss...",
-            error: "Email and password parameters are mandatory.",
+            error: "Secure payload required.",
           ).toMap(),
         ),
       );
     }
+
+    cleanHandshakePool();
+
+    String? decryptedData;
+    for (var handshake in handshakePool) {
+      try {
+        decryptedData = ZeytinTokener(
+          handshake['key'],
+        ).decryptString(encryptedPayload);
+        break;
+      } catch (_) {
+        continue;
+      }
+    }
+
+    if (decryptedData == null) {
+      return Response.forbidden(
+        jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opss...",
+            error: "Invalid or expired handshake key.",
+          ).toMap(),
+        ),
+      );
+    }
+
+    final parts = decryptedData.split('|');
+    if (parts.length != 2) {
+      return Response.badRequest(
+        body: jsonEncode(
+          ZeytinResponse(
+            isSuccess: false,
+            message: "Opss...",
+            error: "Invalid payload format.",
+          ).toMap(),
+        ),
+      );
+    }
+
+    final String email = parts[0];
+    final String password = parts[1];
 
     ZeytinResponse zeytinResponse = await ZeytinAccounts.login(
       zeytin,

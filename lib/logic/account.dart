@@ -15,7 +15,7 @@ class ZeytinAccounts {
     final results = await zeytin.filter(
       "system",
       "trucks",
-      (data) => data["email"] == email,
+      (data) => data["email"].toString().toLowerCase() == email.toLowerCase(),
     );
     return results.isNotEmpty;
   }
@@ -25,7 +25,6 @@ class ZeytinAccounts {
     String email,
     String password,
   ) async {
-    
     if (await isEmailRegistered(zeytin, email)) {
       return ZeytinResponse(
         isSuccess: false,

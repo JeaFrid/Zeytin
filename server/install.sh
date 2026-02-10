@@ -73,16 +73,34 @@ echo -e "\n${YELLOW}>>> Do you want to install and configure Nginx with SSL (Cer
 read -p "Choice: " INSTALL_NGINX
 
 if [[ "$INSTALL_NGINX" == "y" ]]; then
-    read -p "Enter your Domain (e.g. api.example.com): " DOMAIN_NAME
+    read -p "Enter your Domain (e.g. zeytin.jeafriday.com): " DOMAIN_NAME
     read -p "Enter your Email for SSL Alerts: " EMAIL_ADDR
-    
+    if [ ! -f "/opt/certbot/venv/bin/certbot" ]; then
+        echo -e "${CYAN}Certbot not found. Installing via Python venv...${NC}"
+        sudo python3 -m venv /opt/certbot/
+        sudo /opt/certbot/venv/bin/pip install --upgrade pip
+        sudo /opt/certbot/venv/bin/pip install certbot certbot-nginx
+        sudo ln -sf /opt/certbot/venv/bin/certbot /usr/bin/certbot
+    fi
     NGINX_CONF="/etc/nginx/sites-available/zeytin"
-    
-    echo -e "${CYAN}Writing Nginx configuration...${NC}"
     sudo bash -c "cat > $NGINX_CONF <<EOF
 server {
     listen 80;
     server_name $DOMAIN_NAME;
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+}
+EOF"
+    sudo ln -sf $NGINX_CONF /etc/nginx/sites-enabled/
+    sudo systemctl restart nginx
+    echo -e "${CYAN}Requesting SSL Certificate...${NC}"
+    sudo /opt/certbot/venv/bin/certbot certonly --webroot -w /var/www/html -d $DOMAIN_NAME --non-interactive --agree-tos -m $EMAIL_ADDR
+    echo -e "${CYAN}Writing your custom final Nginx configuration...${NC}"
+    sudo bash -c "cat > $NGINX_CONF <<EOF
+server {
+    server_name $DOMAIN_NAME;
+    client_max_body_size 100M;
 
     location /.well-known/acme-challenge/ {
         root /var/www/html;
@@ -92,32 +110,47 @@ server {
         proxy_pass http://127.0.0.1:12852;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \\\$http_upgrade;
-        proxy_set_header Connection \"upgrade\";
+        proxy_set_header Connection \\\$http_connection;
         proxy_set_header Host \\\$host;
         proxy_cache_bypass \\\$http_upgrade;
         proxy_set_header X-Real-IP \\\$remote_addr;
         proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \\\$scheme;
+
+        # TRANSFER STABİLİTESİ
+        proxy_buffering off;
+        proxy_read_timeout 300s;
+        proxy_connect_timeout 75s;
     }
+
+    listen 443 ssl; # managed by Certbot
+    ssl_certificate /etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/$DOMAIN_NAME/privkey.pem; # managed by Certbot
+    include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+}
+
+server {
+    if (\\\$host = $DOMAIN_NAME) {
+        return 301 https://\\\$host\\\$request_uri;
+    } # managed by Certbot
+
+    listen 80;
+    server_name $DOMAIN_NAME;
+    return 404; # managed by Certbot
 }
 EOF"
-
-    sudo ln -sf $NGINX_CONF /etc/nginx/sites-enabled/
-    sudo nginx -t
-    sudo systemctl restart nginx
-
-    echo -e "${CYAN}Setting up isolated Certbot environment...${NC}"
-    sudo rm -rf /opt/certbot
-    sudo mkdir -p /opt/certbot
-    sudo python3 -m venv /opt/certbot/venv
-    sudo /opt/certbot/venv/bin/pip install --upgrade pip
-    sudo /opt/certbot/venv/bin/pip install certbot certbot-nginx
-
-    echo -e "${CYAN}Requesting SSL Certificate via isolated Certbot...${NC}"
-    sudo /opt/certbot/venv/bin/certbot --nginx -d $DOMAIN_NAME --non-interactive --agree-tos -m $EMAIL_ADDR --redirect
-    sudo ln -sf /opt/certbot/venv/bin/certbot /usr/bin/certbot
-
-    echo -e "${GREEN}Nginx and SSL configured for $DOMAIN_NAME${NC}"
-    echo -e "${YELLOW}Note: Certbot set up a redirect from HTTP to HTTPS automatically.${NC}"
+    sudo nginx -t && sudo systemctl restart nginx
+    echo -e "${GREEN}Nginx is now running with your exact custom configuration!${NC}"
 fi
-
+echo -e "${CYAN}>>> Setting project permissions...${NC}"
+mkdir -p zeytin zeytin_err
+sudo chown -R $USER:$USER $(pwd)
+chmod -R 755 $(pwd)
+if [ -d "zeytin" ]; then
+    chmod -R 777 zeytin
+fi
+if [ -d "zeytin_err" ]; then
+    chmod -R 777 zeytin_err
+fi
 echo -e "\n${GREEN}INSTALLATION COMPLETE! Run: dart runner.dart${NC}"

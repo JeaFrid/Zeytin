@@ -11,6 +11,20 @@ class ZeytinTokener {
     : key = _deriveKey(passphrase),
       encrypter = Encrypter(AES(_deriveKey(passphrase), mode: AESMode.cbc));
 
+  String encryptString(String text) {
+    final iv = IV.fromSecureRandom(16);
+    final encrypted = encrypter.encrypt(text, iv: iv);
+    return "${iv.base64}:${encrypted.base64}";
+  }
+
+  String decryptString(String encryptedData) {
+    final parts = encryptedData.split(':');
+    if (parts.length != 2) throw FormatException("Invalid format");
+    final iv = IV.fromBase64(parts[0]);
+    final decrypted = encrypter.decrypt(Encrypted.fromBase64(parts[1]), iv: iv);
+    return decrypted;
+  }
+
   static Key _deriveKey(String passphrase) {
     final bytes = utf8.encode(passphrase);
     final hash = sha256.convert(bytes).bytes;

@@ -4,6 +4,7 @@ import 'package:shelf/shelf_io.dart';
 import 'package:shelf_router/shelf_router.dart';
 import 'package:uuid/uuid.dart';
 import 'package:zeytin/html/hello_world.dart';
+import 'package:zeytin/logic/backup_engine.dart';
 import 'package:zeytin/logic/engine.dart';
 import 'package:zeytin/logic/gatekeeper.dart';
 import 'package:zeytin/routes/account.dart';
@@ -17,7 +18,8 @@ void main() async {
   final router = Router();
   var zeytin = Zeytin("./zeytin");
   var zeytinError = Zeytin("./zeytin_err");
-
+  final backupEngine = ZeytinBackupEngine(rootPath: "./");
+  backupEngine.start();
   router.get('/', (Request request) {
     return Response.ok(helloWorldHTML, headers: {'content-type': 'text/html'});
   });
