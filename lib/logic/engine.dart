@@ -10,9 +10,7 @@ class LRUCache<K, V> {
   _Node<V>? _head;
   _Node<V>? _tail;
   int _size = 0;
-
   LRUCache(this.maxSize);
-
   V? get(K key) {
     final node = _map[key];
     if (node == null) return null;
@@ -30,14 +28,11 @@ class LRUCache<K, V> {
       _map[key] = node;
       _addToHead(node);
       _size++;
-      if (_size > maxSize) {
-        _removeTail();
-      }
+      if (_size > maxSize) _removeTail();
     }
   }
 
   bool contains(K key) => _map.containsKey(key);
-
   void remove(K key) {
     final node = _map[key];
     if (node != null) {
@@ -101,16 +96,21 @@ class _Node<V> {
 }
 
 class BinaryEncoder {
-  static const int typeNULL = 0;
-  static const int typeBOOL = 1;
-  static const int typeINT = 2;
-  static const int typeDOUBLE = 3;
-  static const int typeSTRING = 4;
-  static const int typeLIST = 5;
-  static const int typeMAP = 6;
-  static const int magicByte = 0xDB;
-
-  static Uint8List encode(String boxId, String tag, Map<String, dynamic> data) {
+  static const int typeNULL = 0,
+      typeBOOL = 1,
+      typeINT = 2,
+      typeDOUBLE = 3,
+      typeSTRING = 4,
+      typeLIST = 5,
+      typeMAP = 6,
+      typeDATETIME = 7,
+      typeUINT8LIST = 8,
+      magicByte = 0xDB;
+  static Uint8List encode(
+    String boxId,
+    String tag,
+    Map<String, dynamic>? data,
+  ) {
     final builder = BytesBuilder();
     builder.addByte(magicByte);
     final boxBytes = utf8.encode(boxId);
@@ -119,20 +119,29 @@ class BinaryEncoder {
     final tagBytes = utf8.encode(tag);
     _encodeRawLength(builder, tagBytes.length);
     builder.add(tagBytes);
-    final dataBytes = _encodeMap(data);
-    _encodeRawLength(builder, dataBytes.length);
-    builder.add(dataBytes);
+    if (data == null) {
+      _encodeRawLength(builder, 0);
+    } else {
+      final dataBytes = encodeMap(data);
+      _encodeRawLength(builder, dataBytes.length);
+      builder.add(dataBytes);
+    }
     return builder.toBytes();
   }
 
-  static Uint8List _encodeMap(Map<String, dynamic> data) {
+  static Uint8List encodeMap(Map<String, dynamic> data) {
     final builder = BytesBuilder();
     _encodeValue(builder, data);
     return builder.toBytes();
   }
 
+  static Map<String, dynamic> decodeMap(Uint8List bytes) {
+    final reader = ByteData.sublistView(bytes);
+    return _decodeValue(reader, 0).value as Map<String, dynamic>;
+  }
+
   static Map<String, dynamic> decodeValue(Uint8List bytes) {
-    final reader = ByteData.view(bytes.buffer);
+    final reader = ByteData.sublistView(bytes);
     return _decodeValue(reader, 0).value as Map<String, dynamic>;
   }
 
@@ -157,6 +166,10 @@ class BinaryEncoder {
       final utf8Bytes = utf8.encode(value);
       _encodeRawLength(builder, utf8Bytes.length);
       builder.add(utf8Bytes);
+    } else if (value is Uint8List) {
+      builder.addByte(typeUINT8LIST);
+      _encodeRawLength(builder, value.length);
+      builder.add(value);
     } else if (value is List) {
       builder.addByte(typeLIST);
       _encodeRawLength(builder, value.length);
@@ -170,6 +183,11 @@ class BinaryEncoder {
         _encodeValue(builder, entry.key);
         _encodeValue(builder, entry.value);
       }
+    } else if (value is DateTime) {
+      builder.addByte(typeDATETIME);
+      final bytes = ByteData(8);
+      bytes.setInt64(0, value.millisecondsSinceEpoch, Endian.little);
+      builder.add(bytes.buffer.asUint8List());
     } else {
       throw ArgumentError('Unsupported type: ${value.runtimeType}');
     }
@@ -186,11 +204,24 @@ class BinaryEncoder {
         return MapEntry(offset + 8, reader.getInt64(offset, Endian.little));
       case typeDOUBLE:
         return MapEntry(offset + 8, reader.getFloat64(offset, Endian.little));
+      case typeDATETIME:
+        final millis = reader.getInt64(offset, Endian.little);
+        return MapEntry(
+          offset + 8,
+          DateTime.fromMillisecondsSinceEpoch(millis),
+        );
       case typeSTRING:
         final len = reader.getUint32(offset, Endian.little);
         offset += 4;
         final val = utf8.decode(
-          Uint8List.view(reader.buffer, reader.offsetInBytes + offset, len),
+          reader.buffer.asUint8List(reader.offsetInBytes + offset, len),
+        );
+        return MapEntry(offset + len, val);
+      case typeUINT8LIST:
+        final len = reader.getUint32(offset, Endian.little);
+        offset += 4;
+        final val = Uint8List.fromList(
+          reader.buffer.asUint8List(reader.offsetInBytes + offset, len),
         );
         return MapEntry(offset + len, val);
       case typeLIST:
@@ -209,6 +240,9 @@ class BinaryEncoder {
         final map = <String, dynamic>{};
         for (var i = 0; i < len; i++) {
           final kRes = _decodeValue(reader, offset);
+          if (kRes.value is! String) {
+            throw FormatException('Map key must be String');
+          }
           final vRes = _decodeValue(reader, kRes.key);
           offset = vRes.key;
           map[kRes.value as String] = vRes.value;
@@ -229,19 +263,22 @@ class BinaryEncoder {
 class PersistentIndex {
   final File _file;
   Map<String, Map<String, List<int>>> _index = {};
-
   PersistentIndex(String path) : _file = File(path);
-
   Future<void> load() async {
     if (await _file.exists()) {
-      final bytes = await _file.readAsBytes();
-      if (bytes.isNotEmpty) _index = _deserializeIndex(bytes);
+      try {
+        final bytes = await _file.readAsBytes();
+        if (bytes.isNotEmpty) _index = _deserializeIndex(bytes);
+      } catch (e) {
+        print(e.toString());
+        _index = {};
+      }
     }
   }
 
   Future<void> save() async {
     final bytes = _serializeIndex(_index);
-    await _file.writeAsBytes(bytes);
+    await _file.writeAsBytes(bytes, flush: true);
   }
 
   void update(String boxId, String tag, int offset, int length) {
@@ -251,8 +288,7 @@ class PersistentIndex {
 
   List<int>? get(String boxId, String tag) => _index[boxId]?[tag];
   Map<String, List<int>>? getBox(String boxId) => _index[boxId];
-
-  int getLastOffset() {
+  int getMaxIndexedOffset() {
     int maxOffset = 0;
     for (var box in _index.values) {
       for (var addr in box.values) {
@@ -265,8 +301,11 @@ class PersistentIndex {
   Uint8List _serializeIndex(Map<String, Map<String, List<int>>> index) {
     final builder = BytesBuilder();
     final boxIds = index.keys.toList();
-    final bCount = ByteData(4)..setUint32(0, boxIds.length, Endian.little);
-    builder.add(bCount.buffer.asUint8List());
+    builder.add(
+      (ByteData(
+        4,
+      )..setUint32(0, boxIds.length, Endian.little)).buffer.asUint8List(),
+    );
     for (var bId in boxIds) {
       final bBytes = utf8.encode(bId);
       builder.add(
@@ -300,7 +339,7 @@ class PersistentIndex {
 
   Map<String, Map<String, List<int>>> _deserializeIndex(Uint8List bytes) {
     final res = <String, Map<String, List<int>>>{};
-    final reader = ByteData.view(bytes.buffer);
+    final reader = ByteData.sublistView(bytes);
     int offset = 0;
     if (bytes.length < 4) return res;
     final bCount = reader.getUint32(offset, Endian.little);
@@ -309,7 +348,7 @@ class PersistentIndex {
       final bLen = reader.getUint32(offset, Endian.little);
       offset += 4;
       final bId = utf8.decode(
-        Uint8List.view(reader.buffer, reader.offsetInBytes + offset, bLen),
+        reader.buffer.asUint8List(reader.offsetInBytes + offset, bLen),
       );
       offset += bLen;
       final tCount = reader.getUint32(offset, Endian.little);
@@ -319,7 +358,7 @@ class PersistentIndex {
         final tLen = reader.getUint32(offset, Endian.little);
         offset += 4;
         final t = utf8.decode(
-          Uint8List.view(reader.buffer, reader.offsetInBytes + offset, tLen),
+          reader.buffer.asUint8List(reader.offsetInBytes + offset, tLen),
         );
         offset += tLen;
         final aOff = reader.getUint32(offset, Endian.little);
@@ -335,94 +374,77 @@ class PersistentIndex {
 }
 
 class Truck {
-  final String id;
-  final String path;
+  final String id, path;
   final PersistentIndex _index;
   final LRUCache<String, Map<String, dynamic>> _cache;
-  final Map<String, Map<String, dynamic>> _hotCache = {};
   final Map<String, Map<String, Map<String, Set<String>>>> _fieldIndex = {};
-  int _compactCounter = 0;
-  final int _compactThreshold = 500;
-  bool _isCompacting = false;
-  RandomAccessFile? _reader;
-  RandomAccessFile? _writer;
+  int _compactCounter = 0, _dirtyCount = 0;
+  final int _compactThreshold = 500, _saveThreshold = 500;
+  bool _isCompacting = false, _isSavingIndex = false;
+  RandomAccessFile? _reader, _writer;
   Future<void> _lock = Future.value();
-  int _dirtyCount = 0;
-  final int _saveThreshold = 500;
-  bool _isSavingIndex = false;
-
   Truck(this.id, this.path)
     : _index = PersistentIndex('$path/$id.idx'),
       _cache = LRUCache(10000);
-
   File get _dataFile => File('$path/$id.dat');
-
   Future<void> initialize() async {
-    await _index.load();
-    if (await _dataFile.exists()) {
-      await _repair();
-      _writer = await _dataFile.open(mode: FileMode.append);
-      await _rebuildSearchIndex();
+    try {
+      await _index.load();
+      if (await _dataFile.exists()) {
+        await _repair();
+        await _rebuildSearchIndex();
+        _writer = await _dataFile.open(mode: FileMode.append);
+      }
+    } catch (e, stack) {
+      print("Truck Initialize Error: $e\n$stack");
     }
   }
 
-  Future<T> _synchronized<T>(Future<T> Function() action) async {
-    await _lock;
-    final completer = Completer<T>();
-    _lock = completer.future.catchError((_) {});
-    try {
-      final result = await action();
-      completer.complete(result);
-      return result;
-    } catch (e) {
-      completer.completeError(e);
-      rethrow;
-    }
+  Future<T> _synchronized<T>(Future<T> Function() action) {
+    final result = _lock.then((_) => action());
+    _lock = result.catchError((_) {}).then((_) => null);
+    return result;
   }
 
   Future<Map<String, dynamic>?> _readInternal(String bId, String t) async {
-    final key = '$bId:$t';
-    if (_hotCache.containsKey(key)) return _hotCache[key];
-    final c = _cache.get(key);
-    if (c != null) {
-      _updateHot(key, c);
-      return c;
-    }
+    final key = '$bId:$t', c = _cache.get(key);
+    if (c != null) return c;
     final addr = _index.get(bId, t);
     if (addr == null) return null;
-    _reader ??= await _dataFile.open(mode: FileMode.read);
-
-    await _reader!.setPosition(addr[0]);
-    final block = await _reader!.read(addr[1]);
-    final blockReader = ByteData.view(block.buffer);
-    int offset = 1;
-    final boxIdLen = blockReader.getUint32(offset, Endian.little);
-    offset += 4 + boxIdLen;
-    final tagLen = blockReader.getUint32(offset, Endian.little);
-    offset += 4 + tagLen;
-    final dataLen = blockReader.getUint32(offset, Endian.little);
-    offset += 4;
-    final dataBytes = block.sublist(offset, offset + dataLen);
     try {
-      final data = BinaryEncoder.decodeValue(dataBytes);
+      _reader ??= await _dataFile.open(mode: FileMode.read);
+      await _reader!.setPosition(addr[0]);
+      final block = await _reader!.read(addr[1]);
+      if (block.length < addr[1]) return null;
+
+      final blockReader = ByteData.sublistView(block);
+      int offset = 1;
+      final boxIdLen = blockReader.getUint32(offset, Endian.little);
+      offset += 4 + boxIdLen;
+      final tagLen = blockReader.getUint32(offset, Endian.little);
+      offset += 4 + tagLen;
+      final dataLen = blockReader.getUint32(offset, Endian.little);
+      offset += 4;
+      if (dataLen == 0) return null;
+
+      final data = BinaryEncoder.decodeValue(
+        block.sublist(offset, offset + dataLen),
+      );
       _cache.put(key, data);
-      _updateHot(key, data);
       return data;
     } catch (e) {
+      print("Read error: $e");
       return null;
     }
   }
 
   Future<void> _rebuildSearchIndex() async {
-    final boxes = _index._index.keys;
-    for (var bId in boxes) {
+    for (var bId in _index._index.keys) {
       final boxData = _index.getBox(bId);
       if (boxData == null) continue;
       for (var tag in boxData.keys) {
-        final data = await read(bId, tag);
-        if (data != null) {
-          _updateInternalIndex(bId, tag, data);
-        }
+        final data = await _readInternal(bId, tag);
+        if (data != null) _updateInternalIndex(bId, tag, data);
       }
     }
   }
@@ -438,22 +460,23 @@ class Truck {
     });
   }
 
-  Future<List<Map<String, dynamic>>> queryAdvanced({
-    required String bId,
-    bool Function(Map<String, dynamic>)? filter,
-  }) async {
-    final List<Map<String, dynamic>> results = [];
-    final boxData = _index.getBox(bId);
-    if (boxData == null) return results;
-    for (var tag in boxData.keys) {
-      final data = await read(bId, tag);
-      if (data != null) {
-        if (filter == null || filter(data)) {
-          results.add(data);
+  void _removeFromInternalIndex(
+    String bId,
+    String tag,
+    Map<String, dynamic> data,
+  ) {
+    data.forEach((field, value) {
+      if (value is String) {
+        _fieldIndex[bId]?[field]?[value]?.remove(tag);
+        if (_fieldIndex[bId]?[field]?[value]?.isEmpty ?? false) {
+          _fieldIndex[bId]?[field]?.remove(value);
+        }
+        if (_fieldIndex[bId]?[field]?.isEmpty ?? false) {
+          _fieldIndex[bId]?.remove(field);
         }
       }
-    }
-    return results;
+    });
+    if (_fieldIndex[bId]?.isEmpty ?? false) _fieldIndex.remove(bId);
   }
 
   Future<List<Map<String, dynamic>>> query(
@@ -461,277 +484,272 @@ class Truck {
     String field,
     String prefix,
   ) async {
-    final List<Map<String, dynamic>> results = [];
-    final boxIdx = _fieldIndex[bId];
-    if (boxIdx == null) return results;
-    final fieldIdx = boxIdx[field];
-    if (fieldIdx == null) return results;
-    for (var entry in fieldIdx.entries) {
-      if (entry.key.startsWith(prefix)) {
-        for (var tag in entry.value) {
-          final data = await read(bId, tag);
-          if (data != null) results.add(data);
+    return _synchronized(() async {
+      final List<Map<String, dynamic>> results = [];
+      final fieldIdx = _fieldIndex[bId]?[field];
+      if (fieldIdx == null) return results;
+      for (var entry in fieldIdx.entries) {
+        if (entry.key.startsWith(prefix)) {
+          for (var tag in entry.value) {
+            final data = await _readInternal(bId, tag);
+            if (data != null) results.add(data);
+          }
         }
       }
-    }
-    return results;
+      return results;
+    });
   }
 
   Future<void> _repair() async {
-    final int last = _index.getLastOffset();
     final int actual = await _dataFile.length();
-    if (actual > last) {
-      final raf = await _dataFile.open(mode: FileMode.read);
-      await raf.setPosition(last);
-      int pos = last;
-      while (pos < actual) {
-        try {
-          final magic = await raf.readByte();
-          if (magic != BinaryEncoder.magicByte) break;
-          final bLenBytes = await raf.read(4);
-          final bLen = ByteData.view(
-            bLenBytes.buffer,
-          ).getUint32(0, Endian.little);
-          final boxIdBytes = await raf.read(bLen);
-          final boxId = utf8.decode(boxIdBytes);
-          final tLenBytes = await raf.read(4);
-          final tLen = ByteData.view(
-            tLenBytes.buffer,
-          ).getUint32(0, Endian.little);
-          final tagBytes = await raf.read(tLen);
-          final tag = utf8.decode(tagBytes);
-          final dLenBytes = await raf.read(4);
-          final dLen = ByteData.view(
-            dLenBytes.buffer,
-          ).getUint32(0, Endian.little);
+    final int last = _index.getMaxIndexedOffset();
+    if (actual <= last) return;
+    final raf = await _dataFile.open(mode: FileMode.read);
+    await raf.setPosition(last);
+    int pos = last;
+
+    while (pos < actual) {
+      try {
+        final magicList = await raf.read(1);
+        if (magicList.isEmpty || magicList[0] != BinaryEncoder.magicByte) break;
+        final bLenBytes = await raf.read(4);
+        if (bLenBytes.length < 4) break;
+        final bLen = ByteData.sublistView(
+          bLenBytes,
+        ).getUint32(0, Endian.little);
+
+        final boxIdBytes = await raf.read(bLen);
+        if (boxIdBytes.length < bLen) break;
+        final boxId = utf8.decode(boxIdBytes);
+
+        final tLenBytes = await raf.read(4);
+        if (tLenBytes.length < 4) break;
+        final tLen = ByteData.sublistView(
+          tLenBytes,
+        ).getUint32(0, Endian.little);
+
+        final tagBytes = await raf.read(tLen);
+        if (tagBytes.length < tLen) break;
+        final tag = utf8.decode(tagBytes);
+
+        final dLenBytes = await raf.read(4);
+        if (dLenBytes.length < 4) break;
+        final dLen = ByteData.sublistView(
+          dLenBytes,
+        ).getUint32(0, Endian.little);
+
+        Map<String, dynamic>? data;
+        if (dLen > 0) {
           final dataBytes = await raf.read(dLen);
-          final data = BinaryEncoder.decodeValue(dataBytes);
-          final total = (await raf.position()) - pos;
-          _index.update(boxId, tag, pos, total);
-          _updateInternalIndex(boxId, tag, data);
-          pos = await raf.position();
-        } catch (_) {
-          break;
+          if (dataBytes.length < dLen) break;
+          try {
+            data = BinaryEncoder.decodeValue(dataBytes);
+          } catch (e) {
+            print("Veri onarma hatası (Atlandı) [$boxId:$tag] - $e");
+            data = null;
+          }
         }
+        final newPos = await raf.position();
+        final total = newPos - pos;
+
+        if (data == null) {
+          _index._index[boxId]?.remove(tag);
+          if (_index._index[boxId]?.isEmpty ?? false) {
+            _index._index.remove(boxId);
+          }
+        } else {
+          _index.update(boxId, tag, pos, total);
+        }
+        pos = newPos;
+      } catch (e) {
+        print("Kritik Okuma Hatası (Döngü durdu): $e");
+        break;
       }
-      await raf.close();
-      await _index.save();
     }
+    await raf.close();
+    await _index.save();
   }
 
-  Future<void> write(String bId, String t, Map<String, dynamic> v) {
-    return _synchronized(() async {
-      _writer ??= await _dataFile.open(mode: FileMode.append);
-      final off = await _writer!.length();
-      final bytes = BinaryEncoder.encode(bId, t, v);
-      await _writer!.writeFrom(bytes);
-      await _writer!.flush();
-      _index.update(bId, t, off, bytes.length);
-      _updateInternalIndex(bId, t, v);
-      _dirtyCount++;
-      _compactCounter++;
-      if (_dirtyCount >= _saveThreshold && !_isSavingIndex) _autoSave();
-      if (_compactCounter >= _compactThreshold && !_isCompacting) {
-        _runAutoCompact();
-      }
-      final key = '$bId:$t';
-      _cache.put(key, v);
-      _updateHot(key, v);
-    });
-  }
-
-  Future<void> batch(String bId, Map<String, Map<String, dynamic>> entries) {
-    return _synchronized(() async {
-      _writer ??= await _dataFile.open(mode: FileMode.append);
-      var off = await _writer!.length();
-      for (var entry in entries.entries) {
-        final bytes = BinaryEncoder.encode(bId, entry.key, entry.value);
+  Future<void> write(String bId, String t, Map<String, dynamic> v) =>
+      _synchronized(() async {
+        final oldData = await _readInternal(bId, t);
+        if (oldData != null) _removeFromInternalIndex(bId, t, oldData);
+        _writer ??= await _dataFile.open(mode: FileMode.append);
+        final off = await _writer!.length(),
+            bytes = BinaryEncoder.encode(bId, t, v);
         await _writer!.writeFrom(bytes);
-        _index.update(bId, entry.key, off, bytes.length);
-        _updateInternalIndex(bId, entry.key, entry.value);
-        final key = '$bId:${entry.key}';
-        _cache.put(key, entry.value);
-        _updateHot(key, entry.value);
-        off += bytes.length;
+        await _writer!.flush();
+        _index.update(bId, t, off, bytes.length);
+        _updateInternalIndex(bId, t, v);
+        _cache.put('$bId:$t', v);
         _dirtyCount++;
         _compactCounter++;
-      }
-      await _writer!.flush();
-      if (_dirtyCount >= _saveThreshold && !_isSavingIndex) _autoSave();
-      if (_compactCounter >= _compactThreshold && !_isCompacting) {
-        _runAutoCompact();
-      }
-    });
-  }
-
+        if (_dirtyCount >= _saveThreshold && !_isSavingIndex) _autoSave();
+        if (_compactCounter >= _compactThreshold && !_isCompacting) {
+          _runAutoCompact();
+        }
+      });
+  Future<void> batch(String bId, Map<String, Map<String, dynamic>> entries) =>
+      _synchronized(() async {
+        _writer ??= await _dataFile.open(mode: FileMode.append);
+        var off = await _writer!.length();
+        for (var entry in entries.entries) {
+          final oldData = await _readInternal(bId, entry.key);
+          if (oldData != null) {
+            _removeFromInternalIndex(bId, entry.key, oldData);
+          }
+          final bytes = BinaryEncoder.encode(bId, entry.key, entry.value);
+          await _writer!.writeFrom(bytes);
+          _index.update(bId, entry.key, off, bytes.length);
+          _updateInternalIndex(bId, entry.key, entry.value);
+          _cache.put('$bId:${entry.key}', entry.value);
+          off += bytes.length;
+          _dirtyCount++;
+          _compactCounter++;
+        }
+        await _writer!.flush();
+        if (_dirtyCount >= _saveThreshold && !_isSavingIndex) _autoSave();
+        if (_compactCounter >= _compactThreshold && !_isCompacting) {
+          _runAutoCompact();
+        }
+      });
+  Future<void> removeTag(String bId, String t) => _synchronized(() async {
+    final oldData = await _readInternal(bId, t);
+    if (oldData != null) _removeFromInternalIndex(bId, t, oldData);
+    _writer ??= await _dataFile.open(mode: FileMode.append);
+    await _writer!.writeFrom(BinaryEncoder.encode(bId, t, null));
+    await _writer!.flush();
+    _index._index[bId]?.remove(t);
+    if (_index._index[bId]?.isEmpty ?? false) _index._index.remove(bId);
+    _cache.remove('$bId:$t');
+    await _index.save();
+    _compactCounter++;
+    if (_compactCounter >= _compactThreshold && !_isCompacting) {
+      _runAutoCompact();
+    }
+  });
+  Future<void> removeBox(String bId) => _synchronized(() async {
+    final box = _index.getBox(bId);
+    if (box == null) return;
+    _writer ??= await _dataFile.open(mode: FileMode.append);
+    for (var t in box.keys.toList()) {
+      final oldData = await _readInternal(bId, t);
+      if (oldData != null) _removeFromInternalIndex(bId, t, oldData);
+      await _writer!.writeFrom(BinaryEncoder.encode(bId, t, null));
+      _cache.remove('$bId:$t');
+      _compactCounter++;
+    }
+    await _writer!.flush();
+    _index._index.remove(bId);
+    _fieldIndex.remove(bId);
+    await _index.save();
+    if (_compactCounter >= _compactThreshold && !_isCompacting) {
+      _runAutoCompact();
+    }
+  });
   void _runAutoCompact() {
     _isCompacting = true;
     _compactCounter = 0;
     compact()
-        .then((_) {
-          _isCompacting = false;
-        })
-        .catchError((e) {
-          _isCompacting = false;
-        });
+        .then((_) => _isCompacting = false)
+        .catchError((_) => _isCompacting = false);
   }
 
   void _autoSave() {
     _isSavingIndex = true;
     _dirtyCount = 0;
-    _index.save().then((_) => _isSavingIndex = false).catchError((_) {
-      _isSavingIndex = false;
-    });
+    _index
+        .save()
+        .then((_) => _isSavingIndex = false)
+        .catchError((_) => _isSavingIndex = false);
   }
 
-  Future<Map<String, dynamic>?> read(String bId, String t) {
-    return _synchronized(() async {
-      return await _readInternal(bId, t);
-    });
-  }
-
-  Future<Map<String, Map<String, dynamic>>> readBox(String bId) {
-    return _synchronized(() async {
-      final res = <String, Map<String, dynamic>>{};
-      final box = _index.getBox(bId);
-      if (box == null) return res;
-      for (var t in box.keys) {
-        final data = await _readInternal(bId, t);
+  Future<Map<String, dynamic>?> read(String bId, String t) =>
+      _synchronized(() => _readInternal(bId, t));
+  Future<Map<String, Map<String, dynamic>>> readBox(String bId) =>
+      _synchronized(() async {
+        final res = <String, Map<String, dynamic>>{};
+        final tags = _index.getBox(bId)?.keys.toList() ?? [];
+        for (var t in tags) {
+          final data = await _readInternal(bId, t);
+          if (data != null) res[t] = data;
+        }
+        return res;
+      });
+  Future<void> compact() => _synchronized(() async {
+    final tempFile = File('$path/${id}_temp.dat'),
+        sink = tempFile.openWrite(),
+        newIndex = PersistentIndex('$path/${id}_temp.idx');
+    int currentOffset = 0;
+    for (var bId in _index._index.keys.toList()) {
+      for (var tag in (_index._index[bId]?.keys.toList() ?? [])) {
+        final data = await _readInternal(bId, tag);
         if (data != null) {
-          res[t] = data;
+          final bytes = BinaryEncoder.encode(bId, tag, data);
+          sink.add(bytes);
+          newIndex.update(bId, tag, currentOffset, bytes.length);
+          currentOffset += bytes.length;
         }
       }
-      return res;
-    });
-  }
-
-  void _updateHot(String k, Map<String, dynamic> v) {
-    if (_hotCache.length >= 100) _hotCache.remove(_hotCache.keys.first);
-    _hotCache[k] = v;
-  }
-
-  Future<void> compact() {
-    return _synchronized(() async {
-      final tempFile = File('$path/${id}_temp.dat');
-      final IOSink sink = tempFile.openWrite();
-      final newIndex = PersistentIndex('$path/${id}_temp.idx');
-      int currentOffset = 0;
-      final boxes = _index._index.keys.toList();
-      for (var bId in boxes) {
-        final tags = _index._index[bId]?.keys.toList() ?? [];
-        for (var tag in tags) {
-          final data = await _readInternal(bId, tag);
-          if (data != null) {
-            final bytes = BinaryEncoder.encode(bId, tag, data);
-            sink.add(bytes);
-            newIndex.update(bId, tag, currentOffset, bytes.length);
-            currentOffset += bytes.length;
-          }
-        }
-      }
-      await sink.flush();
-      await sink.close();
-      await _reader?.close();
-      await _writer?.close();
-      _reader = null;
-      _writer = null;
-      final oldDataFile = _dataFile;
-      final oldIdxFile = File(_index._file.path);
-      if (await oldDataFile.exists()) await oldDataFile.delete();
-      if (await oldIdxFile.exists()) await oldIdxFile.delete();
-      await tempFile.rename(oldDataFile.path);
-      await File(newIndex._file.path).rename(oldIdxFile.path);
-      _index._index = newIndex._index;
-      await _index.save();
-      _writer = await _dataFile.open(mode: FileMode.append);
-    });
-  }
-
-  Future<void> close() async {
+    }
+    await sink.flush();
+    await sink.close();
+    await _reader?.close();
+    await _writer?.close();
+    _reader = _writer = null;
+    final oldDataFile = _dataFile, oldIdxFile = File(_index._file.path);
+    if (await oldDataFile.exists()) await oldDataFile.delete();
+    if (await oldIdxFile.exists()) await oldIdxFile.delete();
+    await tempFile.rename(oldDataFile.path);
+    await File(newIndex._file.path).rename(oldIdxFile.path);
+    _index._index = newIndex._index;
+    await _index.save();
+    _writer = await _dataFile.open(mode: FileMode.append);
+  });
+  Future<void> close() async => _synchronized(() async {
     await _index.save();
     await _reader?.close();
     await _writer?.close();
-  }
+    _reader = _writer = null;
+  });
 }
 
 class TruckIsolate {
   late Truck _truck;
-
   Future<void> init(String id, String path) async {
     _truck = Truck(id, path);
     await _truck.initialize();
   }
 
-  Future<void> write(
-    String boxId,
-    String tag,
-    Map<String, dynamic> value,
-  ) async {
-    await _truck.write(boxId, tag, value);
-  }
-
-  Future<Map<String, dynamic>?> read(String boxId, String tag) async {
-    return await _truck.read(boxId, tag);
-  }
-
-  Future<void> batch(
-    String boxId,
-    Map<String, Map<String, dynamic>> entries,
-  ) async {
-    await _truck.batch(boxId, entries);
-  }
-
-  Future<Map<String, Map<String, dynamic>>> readBox(String boxId) async {
-    return await _truck.readBox(boxId);
-  }
-
-  Future<List<Map<String, dynamic>>> query(
-    String boxId,
-    String field,
-    String prefix,
-  ) async {
-    return await _truck.query(boxId, field, prefix);
-  }
-
-  Future<List<Map<String, dynamic>>> queryAdvanced({
-    required String boxId,
-    bool Function(Map<String, dynamic>)? filter,
-  }) async {
-    return await _truck.queryAdvanced(bId: boxId, filter: filter);
-  }
-
-  Future<void> compact() async {
-    await _truck.compact();
-  }
-
-  Future<void> close() async {
-    await _truck.close();
-  }
-
-  Future<void> removeTag(String boxId, String tag) async {
-    _truck._index._index[boxId]?.remove(tag);
-    _truck._cache.remove('$boxId:$tag');
-    await _truck._index.save();
-  }
-
-  Future<bool> contains(String boxId, String tag) async {
-    return await _truck.read(boxId, tag) != null;
-  }
+  Future<void> write(String bId, String t, Map<String, dynamic> v) =>
+      _truck.write(bId, t, v);
+  Future<Map<String, dynamic>?> read(String bId, String t) =>
+      _truck.read(bId, t);
+  Future<void> batch(String bId, Map<String, Map<String, dynamic>> e) =>
+      _truck.batch(bId, e);
+  Future<Map<String, Map<String, dynamic>>> readBox(String bId) =>
+      _truck.readBox(bId);
+  Future<List<Map<String, dynamic>>> query(String bId, String f, String p) =>
+      _truck.query(bId, f, p);
+  Future<void> compact() => _truck.compact();
+  Future<void> close() => _truck.close();
+  Future<void> removeTag(String bId, String t) => _truck.removeTag(bId, t);
+  Future<void> removeBox(String bId) => _truck.removeBox(bId);
+  Future<bool> contains(String bId, String t) async =>
+      (await _truck.read(bId, t)) != null;
 }
 
 class TruckProxy {
-  final String id;
-  final String path;
+  final String id, path;
   late SendPort _sendPort;
   final Map<int, Completer<dynamic>> _completers = {};
   int _messageId = 0;
   final ReceivePort _receivePort = ReceivePort();
-
+  Isolate? _isolate;
   TruckProxy(this.id, this.path);
-
   Future<void> initialize() async {
     final completer = Completer<void>();
-    await Isolate.spawn(_startTruckIsolate, _receivePort.sendPort);
+    _isolate = await Isolate.spawn(_startTruckIsolate, _receivePort.sendPort);
     _receivePort.listen((message) {
       if (message is SendPort) {
         _sendPort = message;
@@ -743,12 +761,11 @@ class TruckProxy {
               if (!completer.isCompleted) completer.completeError(e);
             });
       } else if (message is Map) {
-        final msgId = message['id'] as int;
-        final msgCompleter = _completers[msgId];
+        final msgId = message['id'] as int, msgCompleter = _completers[msgId];
         if (msgCompleter != null) {
           if (message.containsKey('result')) {
             msgCompleter.complete(message['result']);
-          } else if (message.containsKey('error')) {
+          } else {
             msgCompleter.completeError(Exception(message['error']));
           }
           _completers.remove(msgId);
@@ -758,93 +775,64 @@ class TruckProxy {
     return completer.future;
   }
 
-  Future<void> removeTag(String boxId, String tag) async {
-    return await _sendCommand('removeTag', {'boxId': boxId, 'tag': tag});
-  }
-
   static void _startTruckIsolate(SendPort sendPort) {
     final receivePort = ReceivePort();
     sendPort.send(receivePort.sendPort);
     final truckIsolate = TruckIsolate();
     receivePort.listen((message) async {
       if (message is Map) {
-        final command = message['command'] as String;
-        final params = message['params'] as Map<String, dynamic>;
-        final id = message['id'] as int;
+        final command = message['command'] as String,
+            params = message['params'] as Map<String, dynamic>,
+            id = message['id'] as int;
         try {
-          dynamic result;
+          dynamic res;
           switch (command) {
             case 'init':
-              await truckIsolate.init(
-                params['id'] as String,
-                params['path'] as String,
-              );
-              result = null;
+              await truckIsolate.init(params['id'], params['path']);
               break;
             case 'write':
               await truckIsolate.write(
-                params['boxId'] as String,
-                params['tag'] as String,
-                params['value'] as Map<String, dynamic>,
+                params['boxId'],
+                params['tag'],
+                params['value'],
               );
-              result = null;
               break;
             case 'read':
-              result = await truckIsolate.read(
-                params['boxId'] as String,
-                params['tag'] as String,
-              );
+              res = await truckIsolate.read(params['boxId'], params['tag']);
               break;
             case 'batch':
-              await truckIsolate.batch(
-                params['boxId'] as String,
-                params['entries'] as Map<String, Map<String, dynamic>>,
-              );
-              result = null;
+              await truckIsolate.batch(params['boxId'], params['entries']);
               break;
             case 'readBox':
-              result = await truckIsolate.readBox(params['boxId'] as String);
+              res = await truckIsolate.readBox(params['boxId']);
               break;
             case 'query':
-              result = await truckIsolate.query(
-                params['boxId'] as String,
-                params['field'] as String,
-                params['prefix'] as String,
-              );
-              break;
-            case 'queryAdvanced':
-              result = await truckIsolate.queryAdvanced(
-                boxId: params['boxId'] as String,
-                filter:
-                    params['filter'] as bool Function(Map<String, dynamic>)?,
+              res = await truckIsolate.query(
+                params['boxId'],
+                params['field'],
+                params['prefix'],
               );
               break;
             case 'removeTag':
-              await truckIsolate.removeTag(
-                params['boxId'] as String,
-                params['tag'] as String,
-              );
-              result = null;
+              await truckIsolate.removeTag(params['boxId'], params['tag']);
+              break;
+            case 'removeBox':
+              await truckIsolate.removeBox(params['boxId']);
               break;
             case 'compact':
               await truckIsolate.compact();
-              result = null;
               break;
             case 'close':
               await truckIsolate.close();
-              result = null;
               break;
             case 'contains':
-              result = await truckIsolate.contains(
-                params['boxId'] as String,
-                params['tag'] as String,
-              );
+              res = await truckIsolate.contains(params['boxId'], params['tag']);
               break;
-            default:
-              throw Exception('Unknown command: $command');
           }
-          sendPort.send({'id': id, 'result': result});
-        } catch (e) {
+          sendPort.send({'id': id, 'result': res});
+          if (command == 'close') receivePort.close();
+        } catch (e, stackTrace) {
+          print("ISOLATE FATAL ERROR: $e\n$stackTrace");
           sendPort.send({'id': id, 'error': e.toString()});
         }
       }
@@ -852,144 +840,113 @@ class TruckProxy {
   }
 
   Future<dynamic> _sendCommand(String command, Map<String, dynamic> params) {
-    final id = _messageId++;
-    final completer = Completer<dynamic>();
+    final id = _messageId++, completer = Completer<dynamic>();
     _completers[id] = completer;
     _sendPort.send({'command': command, 'params': params, 'id': id});
-    return completer.future;
+    return completer.future.timeout(
+      const Duration(seconds: 30),
+      onTimeout: () {
+        _completers.remove(id);
+        throw TimeoutException('Command $command timed out');
+      },
+    );
   }
 
-  Future<void> write(
-    String boxId,
-    String tag,
-    Map<String, dynamic> value,
-  ) async {
-    return await _sendCommand('write', {
-      'boxId': boxId,
-      'tag': tag,
-      'value': value,
-    });
-  }
-
-  Future<Map<String, dynamic>?> read(String boxId, String tag) async {
-    return await _sendCommand('read', {'boxId': boxId, 'tag': tag});
-  }
-
-  Future<void> batch(
-    String boxId,
-    Map<String, Map<String, dynamic>> entries,
-  ) async {
-    return await _sendCommand('batch', {'boxId': boxId, 'entries': entries});
-  }
-
-  Future<Map<String, Map<String, dynamic>>> readBox(String boxId) async {
-    return await _sendCommand('readBox', {'boxId': boxId});
-  }
-
+  Future<void> write(String bId, String t, Map<String, dynamic> v) =>
+      _sendCommand('write', {'boxId': bId, 'tag': t, 'value': v});
+  Future<Map<String, dynamic>?> read(String bId, String t) async =>
+      await _sendCommand('read', {'boxId': bId, 'tag': t});
+  Future<void> batch(String bId, Map<String, Map<String, dynamic>> e) =>
+      _sendCommand('batch', {'boxId': bId, 'entries': e});
+  Future<Map<String, Map<String, dynamic>>> readBox(String bId) async =>
+      Map<String, Map<String, dynamic>>.from(
+        await _sendCommand('readBox', {'boxId': bId}),
+      );
   Future<List<Map<String, dynamic>>> query(
-    String boxId,
-    String field,
-    String prefix,
-  ) async {
-    return await _sendCommand('query', {
-      'boxId': boxId,
-      'field': field,
-      'prefix': prefix,
-    });
-  }
-
-  Future<List<Map<String, dynamic>>> queryAdvanced({
-    required String boxId,
-    bool Function(Map<String, dynamic>)? filter,
-  }) async {
-    final boxData = await readBox(boxId);
-    final results = <Map<String, dynamic>>[];
-    for (var entry in boxData.values) {
-      if (filter == null || filter(entry)) {
-        results.add(entry);
-      }
-    }
-    return results;
-  }
-
-  Future<void> compact() async {
-    return await _sendCommand('compact', {});
-  }
-
+    String bId,
+    String f,
+    String p,
+  ) async => List<Map<String, dynamic>>.from(
+    await _sendCommand('query', {'boxId': bId, 'field': f, 'prefix': p}),
+  );
+  Future<void> removeTag(String bId, String t) =>
+      _sendCommand('removeTag', {'boxId': bId, 'tag': t});
+  Future<void> removeBox(String bId) =>
+      _sendCommand('removeBox', {'boxId': bId});
+  Future<void> compact() => _sendCommand('compact', {});
   Future<void> close() async {
-    return await _sendCommand('close', {});
+    try {
+      await _sendCommand('close', {});
+    } catch (_) {}
+    _receivePort.close();
+    _isolate?.kill();
   }
 
-  Future<bool> contains(String boxId, String tag) async {
-    return await _sendCommand('contains', {'boxId': boxId, 'tag': tag});
-  }
+  Future<bool> contains(String bId, String t) async =>
+      await _sendCommand('contains', {'boxId': bId, 'tag': t});
 }
 
 class Zeytin {
+  static const int _maxActiveTrucks = 50;
   final String rootPath;
   final LRUCache<String, Map<String, dynamic>> _memoryCache;
   final Map<String, TruckProxy> _activeTrucks = {};
-
+  final List<String> _truckAccessOrder = [];
+  final StreamController<Map<String, dynamic>> _changeController =
+      StreamController<Map<String, dynamic>>.broadcast();
   Zeytin(this.rootPath, {int cacheSize = 50000})
     : _memoryCache = LRUCache(cacheSize) {
     Directory(rootPath).createSync(recursive: true);
   }
-  final StreamController<Map<String, dynamic>> _changeController =
-      StreamController<Map<String, dynamic>>.broadcast();
   Stream<Map<String, dynamic>> get changes => _changeController.stream;
   Future<TruckProxy> _resolveTruck({required String truckId}) async {
     if (_activeTrucks.containsKey(truckId)) {
+      _truckAccessOrder.remove(truckId);
+      _truckAccessOrder.add(truckId);
       return _activeTrucks[truckId]!;
+    }
+    if (_activeTrucks.length >= _maxActiveTrucks) {
+      final oldest = _truckAccessOrder.removeAt(0);
+      await _activeTrucks[oldest]!.close();
+      _activeTrucks.remove(oldest);
     }
     final truck = TruckProxy(truckId, rootPath);
     await truck.initialize();
     _activeTrucks[truckId] = truck;
+    _truckAccessOrder.add(truckId);
     return truck;
   }
 
-  String _generateCacheKey({
-    required String truckId,
-    required String boxId,
-    required String tag,
-  }) {
-    return '$truckId:$boxId:$tag';
-  }
+  String _cacheKey(String tId, String bId, String t) => '$tId:$bId:$t';
 
-  Future<void> delete({
+  Future<void> put({
     required String truckId,
     required String boxId,
     required String tag,
+    required Map<String, dynamic> value,
   }) async {
-    final key = _generateCacheKey(truckId: truckId, boxId: boxId, tag: tag);
+    bool isUpdate = await existsTag(truckId: truckId, boxId: boxId, tag: tag);
     final truck = await _resolveTruck(truckId: truckId);
-    await truck.removeTag(boxId, tag);
-    _memoryCache.remove(key);
+    await truck.write(boxId, tag, value);
+    _memoryCache.put(_cacheKey(truckId, boxId, tag), value);
     _changeController.add({
       "truckId": truckId,
       "boxId": boxId,
       "tag": tag,
-      "op": "DELETE",
+      "op": isUpdate ? "UPDATE" : "PUT",
+      "value": value,
     });
   }
 
-  Future<void> deleteBox({
-    required String truckId,
-    required String boxId,
-  }) async {
-    final truck = await _resolveTruck(truckId: truckId);
-    final boxData = await truck.readBox(boxId);
-    for (var tag in boxData.keys) {
-      final key = _generateCacheKey(truckId: truckId, boxId: boxId, tag: tag);
-      _memoryCache.remove(key);
+  Future<void> compactTruck({required String truckId}) async {
+    if (_activeTrucks.containsKey(truckId)) {
+      final truck = _activeTrucks[truckId]!;
+      await truck.compact();
+      _memoryCache.clear();
     }
-    _changeController.add({
-      "truckId": truckId,
-      "boxId": boxId,
-      "op": "DELETE_BOX",
-    });
   }
 
-  Future<void> deleteTruck({required String truckId}) async {
+  Future<void> deleteTruck(String truckId) async {
     if (_activeTrucks.containsKey(truckId)) {
       await _activeTrucks[truckId]!.close();
       _activeTrucks.remove(truckId);
@@ -1000,24 +957,6 @@ class Zeytin {
     if (await indexFile.exists()) await indexFile.delete();
   }
 
-  List<String> getAllTruck() {
-    final dir = Directory(rootPath);
-    return dir
-        .listSync()
-        .where((entity) => entity is File && entity.path.endsWith('.dat'))
-        .map(
-          (entity) => entity.path
-              .split(Platform.pathSeparator)
-              .last
-              .replaceAll('.dat', ''),
-        )
-        .toList();
-  }
-
-  Map<String, TruckProxy> getAllBox() {
-    return Map.unmodifiable(_activeTrucks);
-  }
-
   Future<void> deleteAll() async {
     for (var truck in _activeTrucks.values) {
       await truck.close();
@@ -1026,33 +965,16 @@ class Zeytin {
     _memoryCache.clear();
     final dir = Directory(rootPath);
     if (await dir.exists()) {
-      await dir.delete(recursive: true);
-      await dir.create(recursive: true);
+      try {
+        await dir.delete(recursive: true);
+        await dir.create(recursive: true);
+      } catch (_) {}
     }
   }
 
-  Future<void> put({
-    required String truckId,
-    required String boxId,
-    required String tag,
-    required Map<String, dynamic> value,
-  }) async {
-    bool isUpdate = await existsTag(truckId: truckId, boxId: boxId, tag: tag);
-
-    final truck = await _resolveTruck(truckId: truckId);
-    await truck.write(boxId, tag, value);
-
-    _memoryCache.put(
-      _generateCacheKey(truckId: truckId, boxId: boxId, tag: tag),
-      value,
-    );
-    _changeController.add({
-      "truckId": truckId,
-      "boxId": boxId,
-      "tag": tag,
-      "op": isUpdate ? "UPDATE" : "PUT",
-      "value": value,
-    });
+  Future<bool> existsTruck({required String truckId}) async {
+    final dataFile = File('$rootPath/$truckId.dat');
+    return await dataFile.exists();
   }
 
   Future<void> putBatch({
@@ -1063,10 +985,7 @@ class Zeytin {
     final truck = await _resolveTruck(truckId: truckId);
     await truck.batch(boxId, entries);
     for (var entry in entries.entries) {
-      _memoryCache.put(
-        _generateCacheKey(truckId: truckId, boxId: boxId, tag: entry.key),
-        entry.value,
-      );
+      _memoryCache.put(_cacheKey(truckId, boxId, entry.key), entry.value);
     }
     _changeController.add({
       "truckId": truckId,
@@ -1081,18 +1000,12 @@ class Zeytin {
     required String boxId,
     required String tag,
   }) async {
-    final cacheKey = _generateCacheKey(
-      truckId: truckId,
-      boxId: boxId,
-      tag: tag,
-    );
-    final cachedValue = _memoryCache.get(cacheKey);
-    if (cachedValue != null) return cachedValue;
-    final truck = await _resolveTruck(truckId: truckId);
-    final data = await truck.read(boxId, tag);
-    if (data != null) {
-      _memoryCache.put(cacheKey, data);
-    }
+    final cKey = _cacheKey(truckId, boxId, tag),
+        cached = _memoryCache.get(cKey);
+    if (cached != null) return cached;
+    final truck = await _resolveTruck(truckId: truckId),
+        data = await truck.read(boxId, tag);
+    if (data != null) _memoryCache.put(cKey, data);
     return data;
   }
 
@@ -1101,14 +1014,58 @@ class Zeytin {
     required String boxId,
   }) async {
     final truck = await _resolveTruck(truckId: truckId);
-    final boxData = await truck.readBox(boxId);
-    for (var entry in boxData.entries) {
-      _memoryCache.put(
-        _generateCacheKey(truckId: truckId, boxId: boxId, tag: entry.key),
-        entry.value,
-      );
-    }
-    return boxData;
+    return await truck.readBox(boxId);
+  }
+
+  Future<bool> existsBox({
+    required String truckId,
+    required String boxId,
+  }) async {
+    final truck = await _resolveTruck(truckId: truckId);
+    final data = await truck.readBox(boxId);
+    return data.isNotEmpty;
+  }
+
+  Future<bool> existsTag({
+    required String truckId,
+    required String boxId,
+    required String tag,
+  }) async {
+    if (_memoryCache.contains(_cacheKey(truckId, boxId, tag))) return true;
+    final truck = await _resolveTruck(truckId: truckId);
+    return await truck.contains(boxId, tag);
+  }
+
+  Future<bool> contains(String truckId, String boxId, String tag) async =>
+      existsTag(truckId: truckId, boxId: boxId, tag: tag);
+  Future<void> delete({
+    required String truckId,
+    required String boxId,
+    required String tag,
+  }) async {
+    final truck = await _resolveTruck(truckId: truckId);
+    await truck.removeTag(boxId, tag);
+    _memoryCache.remove(_cacheKey(truckId, boxId, tag));
+    _changeController.add({
+      "truckId": truckId,
+      "boxId": boxId,
+      "tag": tag,
+      "op": "DELETE",
+    });
+  }
+
+  Future<void> deleteBox({
+    required String truckId,
+    required String boxId,
+  }) async {
+    final truck = await _resolveTruck(truckId: truckId);
+    await truck.removeBox(boxId);
+    _memoryCache.clear();
+    _changeController.add({
+      "truckId": truckId,
+      "boxId": boxId,
+      "op": "DELETE_BOX",
+    });
   }
 
   Future<List<Map<String, dynamic>>> search(
@@ -1121,70 +1078,28 @@ class Zeytin {
     return await truck.query(boxId, field, prefix);
   }
 
-  Future<void> compactTruck({required String truckId}) async {
-    if (_activeTrucks.containsKey(truckId)) {
-      final truck = _activeTrucks[truckId]!;
-      await truck.compact();
-      _memoryCache.clear();
-    }
-  }
-
   Future<List<Map<String, dynamic>>> filter(
     String truckId,
     String boxId,
     bool Function(Map<String, dynamic>) predicate,
   ) async {
-    final truck = await _resolveTruck(truckId: truckId);
-    return await truck.queryAdvanced(boxId: boxId, filter: predicate);
-  }
-
-  Future<bool> contains(String truckId, String boxId, String tag) async {
-    if (_memoryCache.contains(
-      _generateCacheKey(truckId: truckId, boxId: boxId, tag: tag),
-    )) {
-      return true;
-    }
-    final truck = await _resolveTruck(truckId: truckId);
-    final data = await truck.read(boxId, tag);
-    return data != null;
-  }
-
-  Future<bool> existsTruck({required String truckId}) async {
-    final dataFile = File('$rootPath/$truckId.dat');
-    return await dataFile.exists();
-  }
-
-  Future<bool> existsBox({
-    required String truckId,
-    required String boxId,
-  }) async {
-    if (!await existsTruck(truckId: truckId)) return false;
-    final truck = await _resolveTruck(truckId: truckId);
-    final boxData = await truck.readBox(boxId);
-    return boxData.isNotEmpty;
-  }
-
-  Future<bool> existsTag({
-    required String truckId,
-    required String boxId,
-    required String tag,
-  }) async {
-    final cacheKey = _generateCacheKey(
-      truckId: truckId,
-      boxId: boxId,
-      tag: tag,
-    );
-    if (_memoryCache.contains(cacheKey)) return true;
-    if (!await existsTruck(truckId: truckId)) return false;
-    final truck = await _resolveTruck(truckId: truckId);
-    return await truck.contains(boxId, tag);
+    final boxData = await getBox(truckId: truckId, boxId: boxId);
+    return boxData.values.where(predicate).toList();
   }
 
   Future<void> createTruck({required String truckId}) async {
-    if (await existsTruck(truckId: truckId)) return;
-    final truck = TruckProxy(truckId, rootPath);
-    await truck.initialize();
-    _activeTrucks[truckId] = truck;
+    await _resolveTruck(truckId: truckId);
+  }
+
+  List<String> getAllTruck() {
+    return Directory(rootPath)
+        .listSync()
+        .where((e) => e is File && e.path.endsWith('.dat'))
+        .map(
+          (e) =>
+              e.path.split(Platform.pathSeparator).last.replaceAll('.dat', ''),
+        )
+        .toList();
   }
 
   Future<void> close() async {
@@ -1192,6 +1107,8 @@ class Zeytin {
       await truck.close();
     }
     _activeTrucks.clear();
+    _truckAccessOrder.clear();
     _memoryCache.clear();
+    await _changeController.close();
   }
 }

@@ -11,3 +11,7 @@
 - Ngnix configuration has been fixed.
 - Sockets compatible with Livekit have been designed.
 - Compatibility with Livekit and Ngnix has been ensured.
+
+## 2.5.0
+
+- Engine updated
