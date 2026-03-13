@@ -550,6 +550,28 @@ Bir odanın aktiflik durumunu WebSocket üzerinden sürekli takip eder.
     * Query parametresi olarak `data`: `{ "roomName": "..." }` (Şifreli).
 * **Davranış:** Oda durumu değiştiğinde (birisi girdiğinde veya son kişi çıktığında) sunucu anlık bildirim gönderir.
 
+---
+
+## 5.6. E-posta Servisi (Mail)
+
+Zeytin, sisteminiz üzerinden kullanıcılarınıza veya dış adreslere e-posta göndermenizi sağlayan dahili bir SMTP istemcisine sahiptir. Bu işlem için sunucu tarafındaki `config.dart` dosyasında geçerli SMTP ayarlarının (host, port, kullanıcı adı, şifre) yapılmış olması gerekmektedir.
+
+Veri güvenliği gereği, gönderilecek mailin içeriği ve alıcı bilgileri ağ üzerinde açık metin olarak taşınmaz. `data` parametresi AES ile şifrelenmiş olmalıdır.
+
+### Özel E-posta Gönderme
+Belirtilen adrese, sizin belirlediğiniz başlık ve HTML içeriği ile e-posta gönderir.
+
+* **Uç Nokta:** `POST /mail/send`
+* **Şifreli Veri İçeriği:**
+    ```json
+    {
+      "to": "kullanici@example.com",
+      "subject": "Sistemimize Hoş Geldiniz!",
+      "html": "<h1>Merhaba!</h1><p>Hesabınız başarıyla oluşturuldu.</p>"
+    }
+    ```
+* **Yanıt:** İşlem başarılı olursa `{"isSuccess": true, "message": "Email deployed successfully!"}` döner.
+
 
 # 6. Sunucu Yönetimi
 

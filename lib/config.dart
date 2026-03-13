@@ -12,4 +12,9 @@ class ZeytinConfig {
   static String liveKitUrl = "ws://127.0.0.1:12133";
   static String liveKitApiKey = "";
   static String liveKitSecretKey = "";
+  static const String smtpHost = 'smtp.gmail.com';
+  static const int smtpPort = 465;
+  static const String smtpUsername = '';
+  static const String smtpPassword = '';
+  static const String senderName = '';
 }

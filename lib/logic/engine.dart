@@ -136,12 +136,12 @@ class BinaryEncoder {
   }
 
   static Map<String, dynamic> decodeMap(Uint8List bytes) {
-    final reader = ByteData.sublistView(bytes);
+    final reader = ByteData.view(bytes.buffer);
     return _decodeValue(reader, 0).value as Map<String, dynamic>;
   }
 
   static Map<String, dynamic> decodeValue(Uint8List bytes) {
-    final reader = ByteData.sublistView(bytes);
+    final reader = ByteData.view(bytes.buffer);
     return _decodeValue(reader, 0).value as Map<String, dynamic>;
   }
 
@@ -214,14 +214,14 @@ class BinaryEncoder {
         final len = reader.getUint32(offset, Endian.little);
         offset += 4;
         final val = utf8.decode(
-          reader.buffer.asUint8List(reader.offsetInBytes + offset, len),
+          Uint8List.view(reader.buffer, reader.offsetInBytes + offset, len),
         );
         return MapEntry(offset + len, val);
       case typeUINT8LIST:
         final len = reader.getUint32(offset, Endian.little);
         offset += 4;
         final val = Uint8List.fromList(
-          reader.buffer.asUint8List(reader.offsetInBytes + offset, len),
+          Uint8List.view(reader.buffer, reader.offsetInBytes + offset, len),
         );
         return MapEntry(offset + len, val);
       case typeLIST:
@@ -266,13 +266,8 @@ class PersistentIndex {
   PersistentIndex(String path) : _file = File(path);
   Future<void> load() async {
     if (await _file.exists()) {
-      try {
-        final bytes = await _file.readAsBytes();
-        if (bytes.isNotEmpty) _index = _deserializeIndex(bytes);
-      } catch (e) {
-        print(e.toString());
-        _index = {};
-      }
+      final bytes = await _file.readAsBytes();
+      if (bytes.isNotEmpty) _index = _deserializeIndex(bytes);
     }
   }
 
@@ -339,7 +334,7 @@ class PersistentIndex {
 
   Map<String, Map<String, List<int>>> _deserializeIndex(Uint8List bytes) {
     final res = <String, Map<String, List<int>>>{};
-    final reader = ByteData.sublistView(bytes);
+    final reader = ByteData.view(bytes.buffer);
     int offset = 0;
     if (bytes.length < 4) return res;
     final bCount = reader.getUint32(offset, Endian.little);
@@ -348,7 +343,7 @@ class PersistentIndex {
       final bLen = reader.getUint32(offset, Endian.little);
       offset += 4;
       final bId = utf8.decode(
-        reader.buffer.asUint8List(reader.offsetInBytes + offset, bLen),
+        Uint8List.view(reader.buffer, reader.offsetInBytes + offset, bLen),
       );
       offset += bLen;
       final tCount = reader.getUint32(offset, Endian.little);
@@ -358,7 +353,7 @@ class PersistentIndex {
         final tLen = reader.getUint32(offset, Endian.little);
         offset += 4;
         final t = utf8.decode(
-          reader.buffer.asUint8List(reader.offsetInBytes + offset, tLen),
+          Uint8List.view(reader.buffer, reader.offsetInBytes + offset, tLen),
         );
         offset += tLen;
         final aOff = reader.getUint32(offset, Endian.little);
@@ -388,15 +383,11 @@ class Truck {
       _cache = LRUCache(10000);
   File get _dataFile => File('$path/$id.dat');
   Future<void> initialize() async {
-    try {
-      await _index.load();
-      if (await _dataFile.exists()) {
-        await _repair();
-        await _rebuildSearchIndex();
-        _writer = await _dataFile.open(mode: FileMode.append);
-      }
-    } catch (e, stack) {
-      print("Truck Initialize Error: $e\n$stack");
+    await _index.load();
+    if (await _dataFile.exists()) {
+      await _repair();
+      _writer = await _dataFile.open(mode: FileMode.append);
+      await _rebuildSearchIndex();
     }
   }
 
@@ -411,29 +402,25 @@ class Truck {
     if (c != null) return c;
     final addr = _index.get(bId, t);
     if (addr == null) return null;
+    _reader ??= await _dataFile.open(mode: FileMode.read);
+    await _reader!.setPosition(addr[0]);
+    final block = await _reader!.read(addr[1]);
+    final blockReader = ByteData.view(block.buffer);
+    int offset = 1;
+    final boxIdLen = blockReader.getUint32(offset, Endian.little);
+    offset += 4 + boxIdLen;
+    final tagLen = blockReader.getUint32(offset, Endian.little);
+    offset += 4 + tagLen;
+    final dataLen = blockReader.getUint32(offset, Endian.little);
+    offset += 4;
+    if (dataLen == 0) return null;
     try {
-      _reader ??= await _dataFile.open(mode: FileMode.read);
-      await _reader!.setPosition(addr[0]);
-      final block = await _reader!.read(addr[1]);
-      if (block.length < addr[1]) return null;
-
-      final blockReader = ByteData.sublistView(block);
-      int offset = 1;
-      final boxIdLen = blockReader.getUint32(offset, Endian.little);
-      offset += 4 + boxIdLen;
-      final tagLen = blockReader.getUint32(offset, Endian.little);
-      offset += 4 + tagLen;
-      final dataLen = blockReader.getUint32(offset, Endian.little);
-      offset += 4;
-      if (dataLen == 0) return null;
-
       final data = BinaryEncoder.decodeValue(
         block.sublist(offset, offset + dataLen),
       );
       _cache.put(key, data);
       return data;
     } catch (e) {
-      print("Read error: $e");
       return null;
     }
   }
@@ -501,73 +488,46 @@ class Truck {
   }
 
   Future<void> _repair() async {
-    final int actual = await _dataFile.length();
-    final int last = _index.getMaxIndexedOffset();
-    if (actual <= last) return;
-    final raf = await _dataFile.open(mode: FileMode.read);
-    await raf.setPosition(last);
-    int pos = last;
-
-    while (pos < actual) {
-      try {
-        final magicList = await raf.read(1);
-        if (magicList.isEmpty || magicList[0] != BinaryEncoder.magicByte) break;
-        final bLenBytes = await raf.read(4);
-        if (bLenBytes.length < 4) break;
-        final bLen = ByteData.sublistView(
-          bLenBytes,
-        ).getUint32(0, Endian.little);
-
-        final boxIdBytes = await raf.read(bLen);
-        if (boxIdBytes.length < bLen) break;
-        final boxId = utf8.decode(boxIdBytes);
-
-        final tLenBytes = await raf.read(4);
-        if (tLenBytes.length < 4) break;
-        final tLen = ByteData.sublistView(
-          tLenBytes,
-        ).getUint32(0, Endian.little);
-
-        final tagBytes = await raf.read(tLen);
-        if (tagBytes.length < tLen) break;
-        final tag = utf8.decode(tagBytes);
-
-        final dLenBytes = await raf.read(4);
-        if (dLenBytes.length < 4) break;
-        final dLen = ByteData.sublistView(
-          dLenBytes,
-        ).getUint32(0, Endian.little);
-
-        Map<String, dynamic>? data;
-        if (dLen > 0) {
-          final dataBytes = await raf.read(dLen);
-          if (dataBytes.length < dLen) break;
-          try {
-            data = BinaryEncoder.decodeValue(dataBytes);
-          } catch (e) {
-            print("Veri onarma hatası (Atlandı) [$boxId:$tag] - $e");
-            data = null;
+    final int actual = await _dataFile.length(),
+        last = _index.getMaxIndexedOffset();
+    if (actual > last) {
+      final raf = await _dataFile.open(mode: FileMode.read);
+      await raf.setPosition(last);
+      int pos = last;
+      while (pos < actual) {
+        try {
+          final magic = await raf.readByte();
+          if (magic != BinaryEncoder.magicByte) break;
+          final bLen = (ByteData.view(
+            (await raf.read(4)).buffer,
+          )).getUint32(0, Endian.little);
+          final boxId = utf8.decode(await raf.read(bLen));
+          final tLen = (ByteData.view(
+            (await raf.read(4)).buffer,
+          )).getUint32(0, Endian.little);
+          final tag = utf8.decode(await raf.read(tLen));
+          final dLen = (ByteData.view(
+            (await raf.read(4)).buffer,
+          )).getUint32(0, Endian.little);
+          Map<String, dynamic>? data;
+          if (dLen > 0) data = BinaryEncoder.decodeValue(await raf.read(dLen));
+          final total = (await raf.position()) - pos;
+          if (data == null) {
+            _index._index[boxId]?.remove(tag);
+            if (_index._index[boxId]?.isEmpty ?? false) {
+              _index._index.remove(boxId);
+            }
+          } else {
+            _index.update(boxId, tag, pos, total);
           }
+          pos = await raf.position();
+        } catch (e) {
+          break;
         }
-        final newPos = await raf.position();
-        final total = newPos - pos;
-
-        if (data == null) {
-          _index._index[boxId]?.remove(tag);
-          if (_index._index[boxId]?.isEmpty ?? false) {
-            _index._index.remove(boxId);
-          }
-        } else {
-          _index.update(boxId, tag, pos, total);
-        }
-        pos = newPos;
-      } catch (e) {
-        print("Kritik Okuma Hatası (Döngü durdu): $e");
-        break;
       }
+      await raf.close();
+      await _index.save();
     }
-    await raf.close();
-    await _index.save();
   }
 
   Future<void> write(String bId, String t, Map<String, dynamic> v) =>
@@ -831,8 +791,7 @@ class TruckProxy {
           }
           sendPort.send({'id': id, 'result': res});
           if (command == 'close') receivePort.close();
-        } catch (e, stackTrace) {
-          print("ISOLATE FATAL ERROR: $e\n$stackTrace");
+        } catch (e) {
           sendPort.send({'id': id, 'error': e.toString()});
         }
       }
@@ -919,6 +878,7 @@ class Zeytin {
 
   String _cacheKey(String tId, String bId, String t) => '$tId:$bId:$t';
 
+  // API UYUMLULUK METODLARI
   Future<void> put({
     required String truckId,
     required String boxId,
@@ -936,45 +896,6 @@ class Zeytin {
       "op": isUpdate ? "UPDATE" : "PUT",
       "value": value,
     });
-  }
-
-  Future<void> compactTruck({required String truckId}) async {
-    if (_activeTrucks.containsKey(truckId)) {
-      final truck = _activeTrucks[truckId]!;
-      await truck.compact();
-      _memoryCache.clear();
-    }
-  }
-
-  Future<void> deleteTruck(String truckId) async {
-    if (_activeTrucks.containsKey(truckId)) {
-      await _activeTrucks[truckId]!.close();
-      _activeTrucks.remove(truckId);
-    }
-    final dataFile = File('$rootPath/$truckId.dat');
-    final indexFile = File('$rootPath/$truckId.idx');
-    if (await dataFile.exists()) await dataFile.delete();
-    if (await indexFile.exists()) await indexFile.delete();
-  }
-
-  Future<void> deleteAll() async {
-    for (var truck in _activeTrucks.values) {
-      await truck.close();
-    }
-    _activeTrucks.clear();
-    _memoryCache.clear();
-    final dir = Directory(rootPath);
-    if (await dir.exists()) {
-      try {
-        await dir.delete(recursive: true);
-        await dir.create(recursive: true);
-      } catch (_) {}
-    }
-  }
-
-  Future<bool> existsTruck({required String truckId}) async {
-    final dataFile = File('$rootPath/$truckId.dat');
-    return await dataFile.exists();
   }
 
   Future<void> putBatch({

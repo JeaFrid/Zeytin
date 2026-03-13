@@ -10,6 +10,7 @@ import 'package:zeytin/logic/gatekeeper.dart';
 import 'package:zeytin/routes/account.dart';
 import 'package:zeytin/routes/call.dart';
 import 'package:zeytin/routes/crud.dart';
+import 'package:zeytin/routes/mail.dart';
 import 'package:zeytin/routes/storage.dart';
 import 'package:zeytin/routes/token.dart';
 import 'package:zeytin/routes/watch.dart';
@@ -28,6 +29,7 @@ void main() async {
   });
   accountRoutes(zeytin, router);
   crudRoutes(zeytin, router);
+  mailRoutes(zeytin, router);
   tokenRoutes(zeytin, router);
   storageRoutes(zeytin, router);
   watchRoutes(zeytin, router);

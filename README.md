@@ -1,13 +1,12 @@
 # Zeytin <🫒/>
 
-*Developed for humanity by JeaFriday⁠❥*
+_Developed for humanity by JeaFriday⁠❥_
 
 > 🇹🇷 Tamamen Türkçe döküman için [buraya](docs/tr.md) tıklayın.
 
 > 🇩🇪 Für das vollständige Dokument in deutscher Sprache klicken Sie bitte [hier](docs/ge.md).
 
 > 🇮🇳 पूरे हिंदी दस्तावेज़ के लिए, [यहाँ](docs/in.md) पर क्लिक करें।
-
 
 **Zeytin** is a high-performance, scalable, and security-focused next-generation server solution that eliminates external database dependencies. Leveraging the power of the Dart language, it operates as both a web server and a custom NoSQL database engine.
 
@@ -592,6 +591,29 @@ Continuously tracks the activity status of a room via WebSocket.
   - `token` in the URL path.
   - `data` as a Query parameter: `{ "roomName": "..." }` (Encrypted).
 - **Behavior:** When the room status changes (when someone enters or the last person leaves), the server sends an instant notification.
+
+---
+
+## 5.6. Email Service (Mail)
+
+Zeytin has a built-in SMTP client that allows you to send emails to your users or external addresses through your system. For this process, valid SMTP settings (host, port, username, password) must be configured in the `config.dart` file on the server side.
+
+For data security, the content of the email to be sent and the recipient information are not transported over the network as plain text. The `data` parameter must be encrypted with AES.
+
+### Send Custom Email
+
+Sends an email to the specified address with the subject and HTML content you determine.
+
+- **Endpoint:** `POST /mail/send`
+- **Encrypted Data Content:**
+  ```json
+  {
+    "to": "user@example.com",
+    "subject": "Welcome to our System!",
+    "html": "<h1>Hello!</h1><p>Your account has been successfully created.</p>"
+  }
+  ```
+- **Response:** If the operation is successful, it returns `{"isSuccess": true, "message": "Email deployed successfully!"}`.
 
 # 6. Server Management
 
