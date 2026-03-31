@@ -12,6 +12,107 @@ _Developed for humanity by JeaFriday⁠❥_
 
 In traditional backend architectures, the server and database exist as separate layers, leading to network latency and management challenges. Zeytin breaks down these barriers by embedding the database engine directly into the server's memory and processing threads.
 
+---
+
+## Table of Contents
+
+1. [Why Zeytin?](#why-zeytin)
+   - [Self-Sufficient](#1-self-sufficient)
+   - [Isolation Architecture and High Performance](#2-isolation-architecture-and-high-performance)
+   - [Internal Firewall: Gatekeeper](#3-internal-firewall-gatekeeper)
+   - [End-to-End Encryption](#4-end-to-end-encryption)
+   - [Real-Time and Multimedia Support](#5-real-time-and-multimedia-support)
+2. [Architectural Overview](#architectural-overview)
+3. [Quick Install](#quick-install)
+   - [Debian/Ubuntu](#debianubuntu)
+   - [Fedora/RHEL/CentOS](#fedorарhelcentos)
+   - [Arch Linux](#arch-linux)
+   - [macOS](#macos)
+   - [Windows](#windows-powershell-as-administrator)
+4. [Introduction and Architecture](#1-introduction-and-architecture)
+   - [Data Hierarchy](#data-hierarchy)
+     - [Truck](#1-truck)
+     - [Box](#2-box)
+     - [Tag](#3-tag)
+   - [Example Scenario: Data Flow](#example-scenario-data-flow)
+5. [Installation and Configuration](#2-installation-and-configuration)
+   - [Automatic Installation Script](#automatic-installation-script)
+     - [Basic Dependencies and Dart](#1-basic-dependencies-and-dart)
+     - [LiveKit and Docker Integration](#2-livekit-and-docker-integration-optional)
+     - [Nginx and SSL Configuration](#3-nginx-and-ssl-configuration-optional)
+   - [Dependency Management](#dependency-management)
+6. [Storage Engine](#3-storage-engine)
+   - [Binary Data Format](#31-binary-data-format)
+   - [Persistent Indexing](#32-persistent-indexing)
+   - [Isolate and Proxy Architecture](#33-isolate-and-proxy-architecture)
+   - [Append-Only Writing and Compaction](#34-append-only-writing-and-compaction)
+7. [Security and Authentication](#4-security-and-authentication)
+   - [Gatekeeper: The First Line of Defense](#41-gatekeeper-the-first-line-of-defense)
+     - [DoS and DDoS Protection](#dos-and-ddos-protection-sleep-mode)
+     - [Intelligent Rate Limiting](#intelligent-rate-limiting)
+     - [IP Management](#ip-management-blacklist--whitelist)
+   - [Token Management and Sessions](#42-token-management-and-sessions)
+     - [Token Lifecycle](#token-lifecycle)
+     - [Multi-Account Restriction](#multi-account-restriction)
+   - [Tokener: End-to-End Encryption](#43-tokener-end-to-end-encryption)
+     - [Encryption Logic](#encryption-logic)
+     - [Example Request and Response](#example-request-and-response)
+     - [Client-Side Integration](#client-side-integration)
+8. [API Reference](#5-api-reference)
+   - [Account and Session Management](#51-account-and-session-management)
+     - [Account ID Query](#account-id-query-login)
+     - [Token Creation](#token-creation-log-in)
+     - [Token Deletion](#token-deletion-log-out)
+   - [Admin Operations](#52-admin-operations-localhost-only)
+     - [Create New Account](#create-new-account-admin)
+     - [Change Account Password](#change-account-password-admin)
+   - [Data Operations (CRUD)](#53-data-operations-crud)
+     - [Add / Update Data](#add--update-data)
+     - [Bulk Data Addition](#bulk-data-addition-batch)
+     - [Read Data](#read-data-single)
+     - [Read Box](#read-box-all)
+     - [Delete Data](#delete-data)
+     - [Delete Box](#delete-box)
+     - [Existence Checks](#existence-checks)
+     - [Search and Filtering](#search-and-filtering)
+   - [File Storage](#54-file-storage-storage)
+     - [Upload File](#upload-file)
+     - [Download / View File](#download--view-file)
+   - [Live Monitoring (Watch)](#55-live-monitoring-watch---websocket)
+   - [Call and Broadcast](#56-call-and-broadcast-call---livekit)
+     - [Join Room](#join-room-get-token)
+     - [Room Status Check](#room-status-check)
+     - [Live Room Tracking](#live-room-tracking-stream)
+   - [Email Service](#57-email-service-mail)
+     - [Send Custom Email](#send-custom-email)
+9. [Server Management](#6-server-management)
+   - [Starting Runner](#starting-runner)
+   - [Execution Modes](#61-execution-modes)
+     - [Start Test Mode](#1-start-test-mode)
+     - [Start Live Mode](#2-start-live-mode)
+   - [Monitoring and Control](#62-monitoring-and-control)
+     - [Watch Logs](#3-watch-logs)
+     - [Stop Server](#4-stop-server)
+   - [Maintenance and Infrastructure Operations](#63-maintenance-and-infrastructure-operations)
+     - [Update System](#6-update-system)
+     - [Clear Database & Storage](#7-clear-database--storage)
+     - [Uninstall System](#5-uninstall-system)
+   - [Nginx Management](#64-nginx-management)
+     - [Nginx & SSL Setup](#8-nginx--ssl-setup)
+     - [Remove Nginx Config](#9-remove-nginx-config)
+     - [New Account (Admin)](#10-new-account-admin)
+     - [Change Password (Admin)](#11-change-password-admin)
+   - [Database Manager](#65-database-manager)
+     - [Starting Database Manager](#starting-database-manager)
+   - [Configuration Reference](#66-configuration-reference)
+10. [Testing and Quality Assurance](#7-testing-and-quality-assurance)
+    - [Running Tests](#running-tests)
+    - [Test Structure](#test-structure)
+    - [Continuous Integration](#continuous-integration)
+11. [Conclusion](#8-conclusion)
+
+---
+
 ## Why Zeytin?
 
 It provides a simple yet powerful response to the complex infrastructure problems encountered in modern application development.
@@ -57,10 +158,29 @@ Zeytin's data structure is constructed with real-world logistics logic and consi
 
 A single command is enough to install Zeytin on your server and configure all dependencies (Dart, Docker, Nginx, SSL).
 
-Run this once on your server:
-
+### Debian/Ubuntu
 ```bash
 wget -qO install.sh https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/install.sh && sudo bash install.sh
+```
+
+### Fedora/RHEL/CentOS
+```bash
+wget -qO install.sh https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/platforms/install_fedora.sh && sudo bash install.sh
+```
+
+### Arch Linux
+```bash
+wget -qO install.sh https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/platforms/install_arch.sh && sudo bash install.sh
+```
+
+### macOS
+```bash
+curl -fsSL https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/platforms/install_macos.sh | bash
+```
+
+### Windows (PowerShell as Administrator)
+```powershell
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/platforms/install_windows.ps1" -OutFile "install.ps1"; .\install.ps1
 ```
 
 # 1. Introduction and Architecture

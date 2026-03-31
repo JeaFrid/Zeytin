@@ -43,10 +43,29 @@ Zeytin'in veri yapısı, gerçek dünyadaki lojistik mantığıyla kurgulanmış
 
 Zeytin'i sunucunuza kurmak ve tüm bağımlılıkları (Dart, Docker, Nginx, SSL) ayarlamak için tek bir komut yeterlidir.
 
-Bunu sunucunuzda bir kez çalıştırın;
-
+### Debian/Ubuntu
 ```bash
 wget -qO install.sh https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/install.sh && sudo bash install.sh
+```
+
+### Fedora/RHEL/CentOS
+```bash
+wget -qO install.sh https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/platforms/install_fedora.sh && sudo bash install.sh
+```
+
+### Arch Linux
+```bash
+wget -qO install.sh https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/platforms/install_arch.sh && sudo bash install.sh
+```
+
+### macOS
+```bash
+curl -fsSL https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/platforms/install_macos.sh | bash
+```
+
+### Windows (Yönetici olarak PowerShell)
+```powershell
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/platforms/install_windows.ps1" -OutFile "install.ps1"; .\install.ps1
 ```
 
 

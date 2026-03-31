@@ -37,3 +37,21 @@
 - Everyone was served a cup of coffee.
 
 - The fish were fed.
+
+## 2.8.0
+
+- Multi-platform installation support added! Zeytin can now be installed on Fedora/RHEL/CentOS, Arch Linux, macOS, and Windows with dedicated installation scripts.
+
+- Platform-specific installation scripts have been organized under `server/platforms/` directory for better maintainability.
+
+- Documentation significantly enhanced with a detailed Table of Contents featuring 3-level deep navigation for easier access to specific topics.
+
+- All language versions of documentation (English, German, Hindi, Turkish) have been updated with the new structure.
+
+- The README now includes comprehensive subsections for API endpoints, security features, and server management tools.
+
+- Installation instructions for all supported platforms have been added to the Quick Install section.
+
+- Someone organized the toolbox. Finally.
+
+- The plants were watered (they were getting thirsty).
