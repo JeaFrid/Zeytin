@@ -49,10 +49,29 @@ Die Datenstruktur von Zeytin ist nach realer Logistiklogik aufgebaut und besteht
 
 Ein einziger Befehl reicht aus, um Zeytin auf Ihrem Server zu installieren und alle Abhängigkeiten (Dart, Docker, Nginx, SSL) zu konfigurieren.
 
-Führen Sie dies einmal auf Ihrem Server aus:
-
+### Debian/Ubuntu
 ```bash
 wget -qO install.sh https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/install.sh && sudo bash install.sh
+```
+
+### Fedora/RHEL/CentOS
+```bash
+wget -qO install.sh https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/platforms/install_fedora.sh && sudo bash install.sh
+```
+
+### Arch Linux
+```bash
+wget -qO install.sh https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/platforms/install_arch.sh && sudo bash install.sh
+```
+
+### macOS
+```bash
+curl -fsSL https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/platforms/install_macos.sh | bash
+```
+
+### Windows (PowerShell als Administrator)
+```powershell
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/platforms/install_windows.ps1" -OutFile "install.ps1"; .\install.ps1
 ```
 
 # 1. Einführung und Architektur

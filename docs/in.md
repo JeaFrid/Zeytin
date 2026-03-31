@@ -42,10 +42,29 @@ Zeytin की डेटा संरचना वास्तविक दुन
 
 अपने सर्वर पर Zeytin स्थापित करने और सभी निर्भरताओं (Dart, Docker, Nginx, SSL) को कॉन्फ़िगर करने के लिए एक ही कमांड पर्याप्त है।
 
-इसे अपने सर्वर पर एक बार चलाएँ:
-
+### Debian/Ubuntu
 ```bash
 wget -qO install.sh https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/install.sh && sudo bash install.sh
+```
+
+### Fedora/RHEL/CentOS
+```bash
+wget -qO install.sh https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/platforms/install_fedora.sh && sudo bash install.sh
+```
+
+### Arch Linux
+```bash
+wget -qO install.sh https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/platforms/install_arch.sh && sudo bash install.sh
+```
+
+### macOS
+```bash
+curl -fsSL https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/platforms/install_macos.sh | bash
+```
+
+### Windows (प्रशासक के रूप में PowerShell)
+```powershell
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/JeaFrid/Zeytin/main/server/platforms/install_windows.ps1" -OutFile "install.ps1"; .\install.ps1
 ```
 
 
