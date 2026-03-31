@@ -1,6 +1,6 @@
 name: zeytin
 description: A server solution that is independent of external dependencies, has its own database engine, is end-to-end encrypted, and is autonomous.
-version: 2.6.0
+version: 2.7.0
 license: AGPL-3.0
 repository: https://github.com/JeaFrid/Zeytin
 

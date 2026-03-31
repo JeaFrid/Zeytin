@@ -8,6 +8,7 @@ import 'package:zeytin/logic/backup_engine.dart';
 import 'package:zeytin/logic/engine.dart';
 import 'package:zeytin/logic/gatekeeper.dart';
 import 'package:zeytin/routes/account.dart';
+import 'package:zeytin/routes/admin.dart';
 import 'package:zeytin/routes/call.dart';
 import 'package:zeytin/routes/crud.dart';
 import 'package:zeytin/routes/mail.dart';
@@ -28,6 +29,7 @@ void main() async {
     return Response.found('https://github.com/JeaFrid/zeytin');
   });
   accountRoutes(zeytin, router);
+  adminRoutes(zeytin, router);
   crudRoutes(zeytin, router);
   mailRoutes(zeytin, router);
   tokenRoutes(zeytin, router);

@@ -17,4 +17,5 @@ class ZeytinConfig {
   static const String smtpUsername = '';
   static const String smtpPassword = '';
   static const String senderName = '';
+  static const String adminSecret = "zeytin-admin-secret-change-me-in-production";
 }
