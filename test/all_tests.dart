@@ -1,6 +1,8 @@
 import 'dart:io';
 
 import 'account_test.dart' as account_test;
+import 'admin_test.dart' as admin_test;
+import 'db_manager_test.dart' as db_manager_test;
 import 'engine_test.dart' as engine_test;
 import 'gatekeeper_test.dart' as gatekeeper_test;
 import 'ip_test.dart' as ip_test;
@@ -28,6 +30,8 @@ void main() async {
   gatekeeper_test.main();
   engine_test.main();
   account_test.main();
+  admin_test.main();
+  db_manager_test.main();
 
   await cleanupTestData();
 }

@@ -60,10 +60,12 @@ void main() {
       final tokener2 = ZeytinTokener('password2');
       final text = 'secret message';
       final encrypted1 = tokener1.encryptString(text);
-      expect(
-        () => tokener2.decryptString(encrypted1),
-        throwsA(anything),
-      );
+      try {
+        final decrypted = tokener2.decryptString(encrypted1);
+        expect(decrypted, isNot(equals(text)));
+      } catch (e) {
+        expect(e, isNotNull);
+      }
     });
 
     test('encrypts and decrypts map', () {

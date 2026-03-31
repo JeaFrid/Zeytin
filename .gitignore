@@ -1,26 +1,19 @@
-# https://dart.dev/guides/libraries/private-files
-# Dart & Pub related
 .dart_tool/
 .packages
 .pub-cache/
 .pub/
 build/
-
-# Project Specific Database & Logs
 zeytin/
 zeytin_err/
 *.log
 *.pid
 bin/*.exe
 project_indexer.py
-
-# Environment & OS files
 .env
 .DS_Store
 Thumbs.db
-
-# Backup files
 *.bak
 *.tmp
-
+test_data
+client
 full_project_index.txt

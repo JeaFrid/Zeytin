@@ -175,7 +175,7 @@ Sistemin çalışması için gerekli olan paketler `pubspec.yaml` dosyasında ta
 * **dart_jsonwebtoken:** LiveKit ile güvenli iletişim kurmak için JWT tokenlarını oluşturur.
 * **dio:** Sunucunun, kendi içindeki veya dış dünyadaki diğer servislere HTTP istekleri atmasını sağlar.
 
-Kurulum tamamlandıktan sonra, sunucuyu yönetmek için `server/runner.dart` aracını kullanmaya hazırsınız demektir.
+Kurulum tamamlandıktan sonra, sunucuyu yönetmek için `server/runner.dart` aracını ve veritabanı işlemleri için `server/db_manager.dart` aracını kullanmaya hazırsınız demektir.
 
 
 # 3. Depolama Motoru
@@ -360,24 +360,21 @@ Aksi belirtilmediği sürece, **CRUD**, **Call** ve **Watch** altındaki tüm is
 
 Bu uç noktalar veritabanı motoruna giriş kapısıdır. Buradaki veriler şifrelenmeden, açık JSON formatında gönderilir.
 
-### Yeni Hesap (Truck) Oluşturma
-Sistemde yeni bir kullanıcı alanı (Truck) oluşturur.
+> **Önemli Güvenlik Notu:** Güvenlik nedeniyle halka açık hesap oluşturma kapatılmıştır. Yeni hesaplar sadece yöneticiler tarafından sunucu yönetim araçları üzerinden oluşturulabilir. Normal kullanıcılar sadece mevcut kimlik bilgileriyle giriş yapabilir.
 
-* **Uç Nokta:** `POST /truck/create`
-* **Gövde (Body):**
+### Hesap ID Sorgulama (Giriş Yapma)
+
+E-posta ve şifre doğrulaması yaparak kullanıcının Truck ID'sini getirir. Bu, normal kullanıcılar için birincil kimlik doğrulama uç noktasıdır.
+
+* **Uç Nokta:** `POST /truck/id`
+* **Gövde:**
     ```json
     {
       "email": "ornek@mail.com",
       "password": "guclu_bir_sifre"
     }
     ```
-* **Yanıt:** Başarılı olursa oluşturulan Truck ID'sini döner.
-
-### Hesap ID Sorgulama
-E-posta ve şifre doğrulaması yaparak kullanıcının Truck ID'sini getirir.
-
-* **Uç Nokta:** `POST /truck/id`
-* **Gövde:** E-posta ve şifre (yukarıdakiyle aynı).
+* **Yanıt:** Kimlik bilgileri geçerliyse Truck ID'sini döner.
 
 ### Token Oluşturma (Oturum Açma)
 İşlem yapmak için gerekli olan geçici oturum anahtarını (Token) üretir. Bu token 2 dakika (120 saniye) geçerlidir.
@@ -400,7 +397,47 @@ Aktif bir token'ı süresi dolmadan geçersiz kılar.
 
 ---
 
-## 5.2. Veri İşlemleri (CRUD)
+## 5.2. Yönetici İşlemleri (Sadece Localhost)
+
+Bu uç noktalar sadece localhost erişimine kısıtlanmıştır ve bir yönetici gizli anahtarı gerektirir. Sunucu yöneticilerinin kullanıcı hesaplarını doğrudan sunucu makinesinden yönetmeleri için tasarlanmıştır.
+
+### Yeni Hesap Oluşturma (Yönetici)
+
+Yeni bir kullanıcı hesabı oluşturur. Sadece localhost'tan (127.0.0.1, ::1) erişilebilir.
+
+* **Uç Nokta:** `POST /admin/truck/create`
+* **Erişim:** Sadece localhost
+* **Gövde:**
+    ```json
+    {
+      "adminSecret": "config-dosyasindaki-admin-secret",
+      "email": "yenikullanici@example.com",
+      "password": "guclu_sifre"
+    }
+    ```
+* **Yanıt:** Oluşturulan Truck ID ve hesap detaylarını döner.
+
+### Hesap Şifresi Değiştirme (Yönetici)
+
+Mevcut bir hesabın şifresini değiştirir. Sadece localhost'tan erişilebilir.
+
+* **Uç Nokta:** `POST /admin/truck/changePassword`
+* **Erişim:** Sadece localhost
+* **Gövde:**
+    ```json
+    {
+      "adminSecret": "config-dosyasindaki-admin-secret",
+      "email": "kullanici@example.com",
+      "newPassword": "yeni_guclu_sifre"
+    }
+    ```
+* **Yanıt:** Güncellenmiş hesap detaylarıyla başarı onayı döner.
+
+> **Güvenlik Notu:** `adminSecret` değeri `lib/config.dart` dosyasında tanımlanır ve gizli tutulmalıdır. Bu uç noktalara harici ağlardan erişilemez.
+
+---
+
+## 5.3. Veri İşlemleri (CRUD)
 
 Bu bölümdeki tüm istekler iki parametre alır:
 1.  `token`: `/token/create` adresinden alınan geçerli oturum anahtarı.
@@ -651,6 +688,160 @@ Eğer kurulum aşamasında SSL ve Domain ayarlarını yapmadıysanız veya deği
 
 ### 9. Remove Nginx Config
 Zeytin için oluşturulmuş Nginx ayar dosyalarını ve kısayollarını siler, ardından Nginx servisini yeniden başlatır. Sunucunuz artık dış dünyaya (80/443 portlarına) yanıt vermez, sadece yerel porttan (12852) çalışır.
+
+### 10. Yeni Hesap (Yönetici)
+
+Sunucu yönetim arayüzünden doğrudan yeni bir kullanıcı hesabı oluşturur. Halka açık kayıt kapatıldığı için hesap oluşturmanın önerilen yolu budur.
+
+* **İşlem:** E-posta ve şifre sorar, ardından `/admin/truck/create` uç noktasına istek gönderir.
+* **Gereksinimler:** Sunucu çalışıyor olmalıdır (seçenek 1 veya 2).
+* **Çıktı:** Oluşturulan Truck ID ve kimlik bilgilerini gösterir.
+
+### 11. Şifre Değiştir (Yönetici)
+
+Mevcut bir kullanıcı hesabının şifresini değiştirir.
+
+* **İşlem:** E-posta ve yeni şifre sorar, ardından `/admin/truck/changePassword` uç noktasına istek gönderir.
+* **Gereksinimler:** Sunucu çalışıyor olmalı ve hesap mevcut olmalıdır.
+* **Güvenlik:** Yazım hatalarını önlemek için şifre onayı gerektirir.
+
+---
+
+## 6.5. Veritabanı Yöneticisi
+
+Runner'a ek olarak, Zeytin gelişmiş işlemler için özel bir veritabanı yönetim aracı sağlar. `server/db_manager.dart` dosyası, doğrudan veritabanı manipülasyonu için etkileşimli bir terminal arayüzü sunar.
+
+### Veritabanı Yöneticisini Başlatma
+
+```bash
+dart server/db_manager.dart
+```
+
+Bu, aşağıdaki yeteneklere sahip menü tabanlı bir arayüz açar:
+
+**Hesap Yönetimi:**
+- Tüm kullanıcı hesaplarını detaylarıyla listele (e-posta, oluşturma tarihi, Truck ID)
+- Yeni hesaplar oluştur
+- Hesaplar arasında seç ve geçiş yap
+- Hesapları ve ilişkili tüm verileri sil
+
+**Kutu Yönetimi:**
+- Seçili hesaptaki tüm kutuları listele
+- Üzerinde çalışmak için bir kutu seç
+- Kutuları ve içeriklerini sil
+- Kutu başına öğe sayılarını görüntüle
+
+**Veri İşlemleri:**
+- Bir kutudaki tüm veri öğelerini listele
+- Tag'e göre belirli veriyi getir
+- Kutu içinde arama yap (önek tabanlı)
+- Tüm kutularda arama yap
+- Yeni veri ekle (JSON formatında)
+- Tag'e göre veri sil
+
+**Sistem İstatistikleri:**
+- Toplam hesap sayısı
+- Toplam kutu sayısı
+- Sistemdeki toplam veri öğeleri
+- Veritabanı yolu bilgisi
+
+> **Kullanım Alanı:** Veritabanı Yöneticisi, hata ayıklama, veri inceleme, manuel veri girişi ve sistem bakım görevleri için idealdir. REST API'den geçmeden depolama motoruna doğrudan erişim sağlar.
+
+---
+
+## 6.6. Yapılandırma Referansı
+
+`lib/config.dart` dosyası kritik sistem parametrelerini içerir. Bilmeniz gereken temel ayarlar:
+
+**Güvenlik Ayarları:**
+- `adminSecret`: Yönetici işlemleri için gizli anahtar. Kurulumdan hemen sonra değiştirin.
+- `blacklistedIPs`: Sunucuya erişimi kalıcı olarak engellenen IP adresleri listesi.
+- `whitelistedIPs`: Hız sınırlamasından muaf tutulan IP adresleri listesi.
+
+**Sistem Limitleri:**
+- `maxTruckCount`: Sistemde izin verilen maksimum kullanıcı hesabı sayısı (varsayılan: 10.000).
+- `maxTruckPerIp`: Tek bir IP adresinden oluşturulabilecek maksimum hesap sayısı (varsayılan: 20).
+- `truckCreationCooldownMs`: Aynı IP'den hesap oluşturmaları arasındaki bekleme süresi (varsayılan: 10 dakika).
+
+**Hız Sınırlama:**
+- `globalDosThreshold`: Uyku Modu aktive olmadan önceki toplam istek eşiği (varsayılan: 50.000).
+- `generalIpRateLimit5Sec`: 5 saniyede IP başına maksimum istek (varsayılan: 100).
+
+**LiveKit Ayarları:**
+- `liveKitUrl`: LiveKit sunucu adresi (kurulum sırasında otomatik yapılandırılır).
+- `liveKitApiKey` & `liveKitApiSecret`: LiveKit entegrasyonu için kimlik doğrulama bilgileri.
+
+**SMTP Ayarları:**
+- `smtpHost`, `smtpPort`, `smtpUsername`, `smtpPassword`: E-posta servisi için e-posta sunucusu yapılandırması.
+
+> **Önemli:** `config.dart` dosyasını değiştirdikten sonra, değişikliklerin etkili olması için sunucuyu yeniden başlatın.
+
+---
+
+# 7. Test ve Kalite Güvencesi
+
+Zeytin, sistem güvenilirliğini sağlamak ve regresyonları erken yakalamak için kapsamlı bir test paketi içerir. Test altyapısı, sistemin tüm kritik bileşenlerini kapsar.
+
+## Testleri Çalıştırma
+
+Tam test paketini çalıştırmak için:
+
+```bash
+dart test test/all_tests.dart
+```
+
+Bu, şunları kapsayan 196'dan fazla test senaryosunu çalıştırır:
+
+- **Hesap Yönetimi:** Kullanıcı oluşturma, kimlik doğrulama ve hesap işlemleri
+- **Yönetici İşlemleri:** Yönetici uç noktası güvenliği ve işlevselliği
+- **Depolama Motoru:** Binary kodlama, indeksleme ve veri kalıcılığı
+- **Gatekeeper:** Hız sınırlama, IP engelleme ve DoS koruması
+- **Token Yönetimi:** Oturum yönetimi ve şifreleme
+- **CRUD İşlemleri:** Veri okuma/yazma işlemleri ve arama işlevselliği
+- **Veritabanı Yöneticisi:** Doğrudan veritabanı manipülasyonu ve yönetim araçları
+
+## Test Yapısı
+
+Bireysel test dosyaları `test/` dizininde bulunur:
+
+- `account_test.dart` - Hesap oluşturma ve giriş testleri
+- `admin_test.dart` - Yönetici uç noktası güvenlik testleri
+- `engine_test.dart` - Depolama motoru ve izolasyon testleri
+- `gatekeeper_test.dart` - Güvenlik ve hız sınırlama testleri
+- `tokener_test.dart` - Şifreleme ve token testleri
+- `db_manager_simple_test.dart` - Veritabanı yöneticisi işlevsellik testleri
+- `routes_test.dart` - API uç noktası entegrasyon testleri
+
+## Sürekli Entegrasyon
+
+Testler, üretime güncellemeler dağıtmadan önce çalıştırılmalıdır. Test paketi 3 saniyenin altında tamamlanacak şekilde tasarlanmıştır, bu da hızlı geliştirme döngüleri için uygundur.
+
+```bash
+# Belirli bir test dosyasını çalıştır
+dart test test/admin_test.dart
+
+# Ayrıntılı çıktı ile çalıştır
+dart test test/all_tests.dart -v
+```
+
+---
+
+# 8. Sonuç
+
+Zeytin, uygulama sunucusu ve veritabanı arasındaki geleneksel ayrımı ortadan kaldırarak backend mimarisinde bir paradigma değişimini temsil eder. Bu birleşik yaklaşım şunları sunar:
+
+- **Basitleştirilmiş Altyapı:** Kurulacak, yapılandırılacak veya bakımı yapılacak harici veritabanı yok
+- **Gelişmiş Performans:** Ağ gecikmesi olmadan doğrudan bellek erişimi
+- **Yerleşik Güvenlik:** Gatekeeper'dan uçtan uca şifrelemeye çok katmanlı koruma
+- **Geliştirici Deneyimi:** Sezgisel yönetim araçları ve kapsamlı test
+
+İster gerçek zamanlı bir uygulama, ister güvenli bir veri platformu, ister bir multimedya servisi oluşturuyor olun, Zeytin minimum karmaşıklık ve maksimum kontrol ile ihtiyacınız olan temeli sağlar.
+
+Sorular, katkılar veya destek için [GitHub deposunu](https://github.com/JeaFrid/Zeytin) ziyaret edin.
+
+---
+
+_Geliştirici topluluğu için ❤️ ile JeaFriday tarafından yapıldı._
 
 
 

@@ -2,9 +2,13 @@ import 'dart:math';
 
 int generateTenDigitRandomNumber() {
   final random = Random();
-  int min = 1000000000;
-  int max = 9999999999;
   
-  int result = min + random.nextInt(max - min);
+  final firstDigit = random.nextInt(9) + 1;
+  final remainingDigits = List.generate(9, (_) => random.nextInt(10));
+  int result = firstDigit;
+  for (var digit in remainingDigits) {
+    result = result * 10 + digit;
+  }
+  
   return result;
 }

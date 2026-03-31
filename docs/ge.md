@@ -420,7 +420,47 @@ Macht ein aktives Token ungültig, bevor es abläuft.
 
 ---
 
-## 5.2. Datenoperationen (CRUD)
+## 5.2. Admin-Operationen (Nur Localhost)
+
+Diese Endpunkte sind nur auf Localhost-Zugriff beschränkt und erfordern einen Admin-Geheimschlüssel. Sie sind für Serveradministratoren konzipiert, um Benutzerkonten direkt vom Serverrechner aus zu verwalten.
+
+### Neues Konto erstellen (Admin)
+
+Erstellt ein neues Benutzerkonto. Nur von Localhost (127.0.0.1, ::1) aus zugänglich.
+
+- **Endpunkt:** `POST /admin/truck/create`
+- **Zugriff:** Nur Localhost
+- **Body:**
+  ```json
+  {
+    "adminSecret": "ihr-admin-secret-aus-config",
+    "email": "neuerbenutzer@beispiel.com",
+    "password": "sicheres_passwort"
+  }
+  ```
+- **Antwort:** Gibt die erstellte Truck-ID und Kontodetails zurück.
+
+### Kontopasswort ändern (Admin)
+
+Ändert das Passwort für ein bestehendes Konto. Nur von Localhost aus zugänglich.
+
+- **Endpunkt:** `POST /admin/truck/changePassword`
+- **Zugriff:** Nur Localhost
+- **Body:**
+  ```json
+  {
+    "adminSecret": "ihr-admin-secret-aus-config",
+    "email": "benutzer@beispiel.com",
+    "newPassword": "neues_sicheres_passwort"
+  }
+  ```
+- **Antwort:** Gibt Erfolgsbestätigung mit aktualisierten Kontodetails zurück.
+
+> **Sicherheitshinweis:** Das `adminSecret` ist in `lib/config.dart` definiert und sollte vertraulich behandelt werden. Auf diese Endpunkte kann nicht von externen Netzwerken aus zugegriffen werden.
+
+---
+
+## 5.3. Datenoperationen (CRUD)
 
 Alle Anfragen in diesem Abschnitt nehmen zwei Parameter entgegen:
 
@@ -697,3 +737,142 @@ Löst die Datei `install.sh` erneut aus. Wird verwendet, um eine neue Domain zu 
 ### 9. Remove Nginx Config (Nginx-Konfiguration entfernen)
 
 Löscht die für Zeytin erstellten Nginx-Einstellungsdateien und Verknüpfungen und startet dann den Nginx-Dienst neu. Ihr Server antwortet nicht mehr auf die Außenwelt (Ports 80/443), er arbeitet nur noch vom lokalen Port (12852).
+
+
+---
+
+## 6.5. Datenbank-Manager
+
+Zusätzlich zum Runner bietet Zeytin ein dediziertes Datenbankverwaltungstool für erweiterte Operationen. Die Datei `server/db_manager.dart` bietet eine interaktive Terminalschnittstelle für die direkte Datenbankmanipulation.
+
+### Starten des Datenbank-Managers
+
+```bash
+dart server/db_manager.dart
+```
+
+Dies öffnet eine menügesteuerte Schnittstelle mit folgenden Funktionen:
+
+**Kontoverwaltung:**
+- Alle Benutzerkonten mit Details auflisten (E-Mail, Erstellungsdatum, Truck-ID)
+- Neue Konten erstellen
+- Zwischen Konten auswählen und wechseln
+- Konten und alle zugehörigen Daten löschen
+
+**Box-Verwaltung:**
+- Alle Boxen innerhalb eines ausgewählten Kontos auflisten
+- Eine Box zum Arbeiten auswählen
+- Boxen und deren Inhalte löschen
+- Elementanzahl pro Box anzeigen
+
+**Datenoperationen:**
+- Alle Datenelemente in einer Box auflisten
+- Spezifische Daten nach Tag abrufen
+- Innerhalb einer Box suchen (präfixbasiert)
+- Über alle Boxen hinweg suchen
+- Neue Daten hinzufügen (JSON-Format)
+- Daten nach Tag löschen
+
+**Systemstatistiken:**
+- Gesamtzahl der Konten
+- Gesamtzahl der Boxen
+- Gesamtdatenelemente im gesamten System
+- Datenbankpfadinformationen
+
+> **Anwendungsfall:** Der Datenbank-Manager ist ideal für Debugging, Dateninspektion, manuelle Dateneingabe und Systemwartungsaufgaben. Er bietet direkten Zugriff auf die Speicher-Engine, ohne die REST-API zu durchlaufen.
+
+---
+
+## 6.6. Konfigurationsreferenz
+
+Die Datei `lib/config.dart` enthält kritische Systemparameter. Hier sind die wichtigsten Einstellungen, die Sie kennen sollten:
+
+**Sicherheitseinstellungen:**
+- `adminSecret`: Geheimer Schlüssel für Admin-Operationen. Ändern Sie dies sofort nach der Installation.
+- `blacklistedIPs`: Liste der IP-Adressen, die dauerhaft vom Zugriff auf den Server blockiert sind.
+- `whitelistedIPs`: Liste der IP-Adressen, die von der Ratenbegrenzung ausgenommen sind.
+
+**Systemgrenzen:**
+- `maxTruckCount`: Maximale Anzahl von Benutzerkonten, die im System zulässig sind (Standard: 10.000).
+- `maxTruckPerIp`: Maximale Konten, die von einer einzelnen IP-Adresse erstellt werden können (Standard: 20).
+- `truckCreationCooldownMs`: Abkühlzeit zwischen Kontoerstellungen von derselben IP (Standard: 10 Minuten).
+
+**Ratenbegrenzung:**
+- `globalDosThreshold`: Gesamtanforderungsschwelle, bevor der Ruhemodus aktiviert wird (Standard: 50.000).
+- `generalIpRateLimit5Sec`: Maximale Anfragen pro IP in 5 Sekunden (Standard: 100).
+
+**LiveKit-Einstellungen:**
+- `liveKitUrl`: LiveKit-Serveradresse (während der Installation automatisch konfiguriert).
+- `liveKitApiKey` & `liveKitApiSecret`: Authentifizierungsdaten für die LiveKit-Integration.
+
+**SMTP-Einstellungen:**
+- `smtpHost`, `smtpPort`, `smtpUsername`, `smtpPassword`: E-Mail-Serverkonfiguration für den Mail-Dienst.
+
+> **Wichtig:** Nach dem Ändern von `config.dart` müssen Sie den Server neu starten, damit die Änderungen wirksam werden.
+
+---
+
+# 7. Testen und Qualitätssicherung
+
+Zeytin enthält eine umfassende Testsuite, um die Systemzuverlässigkeit zu gewährleisten und Regressionen frühzeitig zu erkennen. Die Testinfrastruktur deckt alle kritischen Komponenten des Systems ab.
+
+## Tests ausführen
+
+Um die vollständige Testsuite auszuführen:
+
+```bash
+dart test test/all_tests.dart
+```
+
+Dies führt über 196 Testfälle aus, die Folgendes abdecken:
+
+- **Kontoverwaltung:** Benutzererstellung, Authentifizierung und Kontooperationen
+- **Admin-Operationen:** Admin-Endpunktsicherheit und -funktionalität
+- **Speicher-Engine:** Binärkodierung, Indizierung und Datenpersistenz
+- **Gatekeeper:** Ratenbegrenzung, IP-Blockierung und DoS-Schutz
+- **Token-Verwaltung:** Sitzungshandhabung und Verschlüsselung
+- **CRUD-Operationen:** Daten-Lese-/Schreiboperationen und Suchfunktionalität
+- **Datenbank-Manager:** Direkte Datenbankmanipulation und Verwaltungstools
+
+## Teststruktur
+
+Einzelne Testdateien befinden sich im Verzeichnis `test/`:
+
+- `account_test.dart` - Kontoerstellungs- und Anmeldetests
+- `admin_test.dart` - Admin-Endpunktsicherheitstests
+- `engine_test.dart` - Speicher-Engine- und Isolationstests
+- `gatekeeper_test.dart` - Sicherheits- und Ratenbegrenzungstests
+- `tokener_test.dart` - Verschlüsselungs- und Token-Tests
+- `db_manager_simple_test.dart` - Datenbank-Manager-Funktionalitätstests
+- `routes_test.dart` - API-Endpunkt-Integrationstests
+
+## Kontinuierliche Integration
+
+Tests sollten vor der Bereitstellung von Updates in der Produktion ausgeführt werden. Die Testsuite ist so konzipiert, dass sie in unter 3 Sekunden abgeschlossen wird, was sie für schnelle Entwicklungszyklen geeignet macht.
+
+```bash
+# Spezifische Testdatei ausführen
+dart test test/admin_test.dart
+
+# Mit ausführlicher Ausgabe ausführen
+dart test test/all_tests.dart -v
+```
+
+---
+
+# 8. Fazit
+
+Zeytin stellt einen Paradigmenwechsel in der Backend-Architektur dar, indem es die traditionelle Trennung zwischen Anwendungsserver und Datenbank beseitigt. Dieser einheitliche Ansatz bietet:
+
+- **Vereinfachte Infrastruktur:** Keine externe Datenbank zum Installieren, Konfigurieren oder Warten
+- **Verbesserte Leistung:** Direkter Speicherzugriff ohne Netzwerklatenz
+- **Integrierte Sicherheit:** Mehrschichtiger Schutz von Gatekeeper bis Ende-zu-Ende-Verschlüsselung
+- **Entwicklererfahrung:** Intuitive Verwaltungstools und umfassende Tests
+
+Egal, ob Sie eine Echtzeitanwendung, eine sichere Datenplattform oder einen Multimedia-Dienst erstellen, Zeytin bietet die Grundlage, die Sie benötigen, mit minimaler Komplexität und maximaler Kontrolle.
+
+Für Fragen, Beiträge oder Support besuchen Sie das [GitHub-Repository](https://github.com/JeaFrid/Zeytin).
+
+---
+
+_Mit ❤️ von JeaFriday für die Entwickler-Community erstellt._

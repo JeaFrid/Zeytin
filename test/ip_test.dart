@@ -199,7 +199,6 @@ void main() {
     test('handles edge case with leading comma', () {
       final request = createRequest(xForwardedFor: ',192.168.1.1');
       final ip = getClientIp(request);
-      // Empty string or valid IP or unknown are all acceptable
       expect(ip, anyOf(equals('192.168.1.1'), equals('unknown'), equals('')));
     });
 

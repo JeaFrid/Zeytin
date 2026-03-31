@@ -420,7 +420,47 @@ Invalidates an active token before it expires.
 
 ---
 
-## 5.2. Data Operations (CRUD)
+## 5.2. Admin Operations (Localhost Only)
+
+These endpoints are restricted to localhost access only and require an admin secret key. They are designed for server administrators to manage user accounts directly from the server machine.
+
+### Create New Account (Admin)
+
+Creates a new user account. Only accessible from localhost (127.0.0.1, ::1).
+
+- **Endpoint:** `POST /admin/truck/create`
+- **Access:** Localhost only
+- **Body:**
+  ```json
+  {
+    "adminSecret": "your-admin-secret-from-config",
+    "email": "newuser@example.com",
+    "password": "secure_password"
+  }
+  ```
+- **Response:** Returns the created Truck ID and account details.
+
+### Change Account Password (Admin)
+
+Changes the password for an existing account. Only accessible from localhost.
+
+- **Endpoint:** `POST /admin/truck/changePassword`
+- **Access:** Localhost only
+- **Body:**
+  ```json
+  {
+    "adminSecret": "your-admin-secret-from-config",
+    "email": "user@example.com",
+    "newPassword": "new_secure_password"
+  }
+  ```
+- **Response:** Returns success confirmation with updated account details.
+
+> **Security Note:** The `adminSecret` is defined in `lib/config.dart` and should be kept confidential. These endpoints cannot be accessed from external networks.
+
+---
+
+## 5.3. Data Operations (CRUD)
 
 All requests in this section take two parameters:
 
@@ -508,7 +548,7 @@ Lightweight endpoints that check if data exists. They return only `true/false` i
 
 ---
 
-## 5.3. File Storage (Storage)
+## 5.4. File Storage (Storage)
 
 File upload operations are done in standard `multipart/form-data` format. Encryption is not used, but a Token is mandatory.
 
@@ -530,7 +570,7 @@ Uploaded files are served publicly.
 
 ---
 
-## 5.4. Live Monitoring (Watch - WebSocket)
+## 5.5. Live Monitoring (Watch - WebSocket)
 
 Allows clients to listen to changes in the database (add, delete, update) instantly.
 
@@ -548,7 +588,7 @@ Allows clients to listen to changes in the database (add, delete, update) instan
 
 ---
 
-## 5.5. Call and Broadcast (Call - LiveKit)
+## 5.6. Call and Broadcast (Call - LiveKit)
 
 Zeytin works integrated with the LiveKit server to provide necessary "Room" management for voice and video calls.
 
@@ -586,7 +626,7 @@ Continuously tracks the activity status of a room via WebSocket.
 
 ---
 
-## 5.6. Email Service (Mail)
+## 5.7. Email Service (Mail)
 
 Zeytin has a built-in SMTP client that allows you to send emails to your users or external addresses through your system. For this process, valid SMTP settings (host, port, username, password) must be configured in the `config.dart` file on the server side.
 
@@ -697,3 +737,158 @@ Triggers the `install.sh` file again. Used to define a new domain or obtain an S
 ### 9. Remove Nginx Config
 
 Deletes the Nginx setting files and shortcuts created for Zeytin, then restarts the Nginx service. Your server no longer responds to the outside world (ports 80/443), it only works from the local port (12852).
+
+
+### 10. New Account (Admin)
+
+Creates a new user account directly from the server management interface. This is the recommended way to create accounts since public registration is disabled.
+
+- **Process:** Prompts for email and password, then sends a request to the `/admin/truck/create` endpoint.
+- **Requirements:** Server must be running (option 1 or 2).
+- **Output:** Displays the created Truck ID and credentials.
+
+### 11. Change Password (Admin)
+
+Changes the password for an existing user account.
+
+- **Process:** Prompts for email and new password, then sends a request to the `/admin/truck/changePassword` endpoint.
+- **Requirements:** Server must be running, and the account must exist.
+- **Security:** Requires password confirmation to prevent typos.
+
+---
+
+## 6.5. Database Manager
+
+In addition to Runner, Zeytin provides a dedicated database management tool for advanced operations. The `server/db_manager.dart` file offers an interactive terminal interface for direct database manipulation.
+
+### Starting Database Manager
+
+```bash
+dart server/db_manager.dart
+```
+
+This opens a menu-driven interface with the following capabilities:
+
+**Account Management:**
+- List all user accounts with details (email, creation date, Truck ID)
+- Create new accounts
+- Select and switch between accounts
+- Delete accounts and all associated data
+
+**Box Management:**
+- List all boxes within a selected account
+- Select a box to work with
+- Delete boxes and their contents
+- View item counts per box
+
+**Data Operations:**
+- List all data items in a box
+- Retrieve specific data by tag
+- Search within a box (prefix-based)
+- Search across all boxes
+- Add new data (JSON format)
+- Delete data by tag
+
+**System Statistics:**
+- Total number of accounts
+- Total number of boxes
+- Total data items across the system
+- Database path information
+
+> **Use Case:** Database Manager is ideal for debugging, data inspection, manual data entry, and system maintenance tasks. It provides direct access to the storage engine without going through the REST API.
+
+---
+
+## 6.6. Configuration Reference
+
+The `lib/config.dart` file contains critical system parameters. Here are the key settings you should be aware of:
+
+**Security Settings:**
+- `adminSecret`: Secret key for admin operations. Change this immediately after installation.
+- `blacklistedIPs`: List of IP addresses permanently blocked from accessing the server.
+- `whitelistedIPs`: List of IP addresses exempt from rate limiting.
+
+**System Limits:**
+- `maxTruckCount`: Maximum number of user accounts allowed in the system (default: 10,000).
+- `maxTruckPerIp`: Maximum accounts that can be created from a single IP address (default: 20).
+- `truckCreationCooldownMs`: Cooldown period between account creations from the same IP (default: 10 minutes).
+
+**Rate Limiting:**
+- `globalDosThreshold`: Total request threshold before Sleep Mode activates (default: 50,000).
+- `generalIpRateLimit5Sec`: Maximum requests per IP in 5 seconds (default: 100).
+
+**LiveKit Settings:**
+- `liveKitUrl`: LiveKit server address (auto-configured during installation).
+- `liveKitApiKey` & `liveKitApiSecret`: Authentication credentials for LiveKit integration.
+
+**SMTP Settings:**
+- `smtpHost`, `smtpPort`, `smtpUsername`, `smtpPassword`: Email server configuration for the mail service.
+
+> **Important:** After modifying `config.dart`, restart the server for changes to take effect.
+
+---
+
+# 7. Testing and Quality Assurance
+
+Zeytin includes a comprehensive test suite to ensure system reliability and catch regressions early. The test infrastructure covers all critical components of the system.
+
+## Running Tests
+
+To run the complete test suite:
+
+```bash
+dart test test/all_tests.dart
+```
+
+This executes over 196 test cases covering:
+
+- **Account Management:** User creation, authentication, and account operations
+- **Admin Operations:** Admin endpoint security and functionality
+- **Storage Engine:** Binary encoding, indexing, and data persistence
+- **Gatekeeper:** Rate limiting, IP blocking, and DoS protection
+- **Token Management:** Session handling and encryption
+- **CRUD Operations:** Data read/write operations and search functionality
+- **Database Manager:** Direct database manipulation and management tools
+
+## Test Structure
+
+Individual test files are located in the `test/` directory:
+
+- `account_test.dart` - Account creation and login tests
+- `admin_test.dart` - Admin endpoint security tests
+- `engine_test.dart` - Storage engine and isolation tests
+- `gatekeeper_test.dart` - Security and rate limiting tests
+- `tokener_test.dart` - Encryption and token tests
+- `db_manager_simple_test.dart` - Database manager functionality tests
+- `routes_test.dart` - API endpoint integration tests
+
+## Continuous Integration
+
+Tests should be run before deploying updates to production. The test suite is designed to complete in under 3 seconds, making it suitable for rapid development cycles.
+
+```bash
+# Run specific test file
+dart test test/admin_test.dart
+
+# Run with verbose output
+dart test test/all_tests.dart -v
+```
+
+---
+
+# 8. Conclusion
+
+Zeytin represents a paradigm shift in backend architecture by eliminating the traditional separation between application server and database. This unified approach delivers:
+
+- **Simplified Infrastructure:** No external database to install, configure, or maintain
+- **Enhanced Performance:** Direct memory access without network latency
+- **Built-in Security:** Multi-layered protection from Gatekeeper to end-to-end encryption
+- **Developer Experience:** Intuitive management tools and comprehensive testing
+
+Whether you're building a real-time application, a secure data platform, or a multimedia service, Zeytin provides the foundation you need with minimal complexity and maximum control.
+
+For questions, contributions, or support, visit the [GitHub repository](https://github.com/JeaFrid/Zeytin).
+
+---
+
+_Built with ❤️ by JeaFriday for the developer community._

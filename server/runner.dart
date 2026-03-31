@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:async';
+import 'dart:convert';
 
 const String _kReset = '\x1B[0m';
 const String _kBold = '\x1B[1m';
@@ -38,6 +39,8 @@ void main() async {
     print('7. ${_kYellow}Clear Database & Storage$_kReset');
     print('8. ${_kCyan}Nginx & SSL Setup$_kReset');
     print('9. ${_kRed}Remove Nginx Config$_kReset');
+    print('10. ${_kGreen}New Account (Admin)$_kReset');
+    print('11. ${_kYellow}Change Password (Admin)$_kReset');
     print('0. Exit');
 
     stdout.write('\n${_kBold}Choice: $_kReset');
@@ -72,6 +75,12 @@ void main() async {
         break;
       case '9':
         await _removeNginx();
+        break;
+      case '10':
+        await _createNewAccount();
+        break;
+      case '11':
+        await _changePassword();
         break;
       case '0':
         exit(0);
@@ -301,4 +310,164 @@ String _getProjectRoot() {
     return Directory(currentDir).parent.path;
   }
   return currentDir;
+}
+
+Future<void> _createNewAccount() async {
+  print('\n$_kGreen[ADMIN] Create New Account$_kReset');
+  print('This will create a new truck (user account) on the server.\n');
+
+  stdout.write('Enter email address: ');
+  final email = stdin.readLineSync()?.trim();
+  if (email == null || email.isEmpty) {
+    print('$_kRed[ERROR] Email cannot be empty.$_kReset');
+    return;
+  }
+
+  stdout.write('Enter password: ');
+  final password = stdin.readLineSync()?.trim();
+  if (password == null || password.isEmpty) {
+    print('$_kRed[ERROR] Password cannot be empty.$_kReset');
+    return;
+  }
+
+  print('\n$_kCyan[INFO] Creating account...$_kReset');
+
+  try {
+    final configFile = File('${_getProjectRoot()}/lib/config.dart');
+    if (!configFile.existsSync()) {
+      print('$_kRed[ERROR] Config file not found!$_kReset');
+      return;
+    }
+
+    final configContent = await configFile.readAsString();
+    final adminSecretMatch = RegExp(
+      r'adminSecret = "([^"]+)"',
+    ).firstMatch(configContent);
+
+    if (adminSecretMatch == null) {
+      print('$_kRed[ERROR] Admin secret not found in config!$_kReset');
+      return;
+    }
+    final adminSecret = adminSecretMatch.group(1);
+    final client = HttpClient();
+    final request = await client.postUrl(
+      Uri.parse('http://127.0.0.1:12852/admin/truck/create'),
+    );
+    request.headers.set('content-type', 'application/json');
+
+    final body = jsonEncode({
+      'adminSecret': adminSecret,
+      'email': email,
+      'password': password,
+    });
+
+    request.write(body);
+    final response = await request.close();
+    final responseBody = await response.transform(utf8.decoder).join();
+    client.close();
+
+    final data = jsonDecode(responseBody);
+
+    if (response.statusCode == 200 && data['isSuccess'] == true) {
+      print('\n$_kGreen[SUCCESS] Account created successfully!$_kReset\n');
+      print('${_kBold}Account Details:$_kReset');
+      print('  Truck ID: ${data['data']['truckId']}');
+      print('  Email:    ${data['data']['email']}');
+      print('  Password: ${data['data']['password']}');
+      print('\n${_kYellow}Save these credentials securely!$_kReset');
+    } else {
+      print(
+        '\n$_kRed[ERROR] Failed to create account: ${data['error'] ?? 'Unknown error'}$_kReset',
+      );
+    }
+  } catch (e) {
+    print('\n$_kRed[ERROR] Request failed: $e$_kReset');
+    print(
+      '${_kYellow}Make sure the server is running (option 1 or 2).$_kReset',
+    );
+  }
+}
+
+Future<void> _changePassword() async {
+  print('\n$_kYellow[ADMIN] Change Account Password$_kReset');
+  print('This will change the password for an existing account.\n');
+
+  stdout.write('Enter email address: ');
+  final email = stdin.readLineSync()?.trim();
+  if (email == null || email.isEmpty) {
+    print('$_kRed[ERROR] Email cannot be empty.$_kReset');
+    return;
+  }
+
+  stdout.write('Enter new password: ');
+  final newPassword = stdin.readLineSync()?.trim();
+  if (newPassword == null || newPassword.isEmpty) {
+    print('$_kRed[ERROR] Password cannot be empty.$_kReset');
+    return;
+  }
+
+  stdout.write('Confirm new password: ');
+  final confirmPassword = stdin.readLineSync()?.trim();
+  if (confirmPassword != newPassword) {
+    print('$_kRed[ERROR] Passwords do not match!$_kReset');
+    return;
+  }
+
+  print('\n$_kCyan[INFO] Changing password...$_kReset');
+
+  try {
+    final configFile = File('${_getProjectRoot()}/lib/config.dart');
+    if (!configFile.existsSync()) {
+      print('$_kRed[ERROR] Config file not found!$_kReset');
+      return;
+    }
+
+    final configContent = await configFile.readAsString();
+    final adminSecretMatch = RegExp(
+      r'adminSecret = "([^"]+)"',
+    ).firstMatch(configContent);
+
+    if (adminSecretMatch == null) {
+      print('$_kRed[ERROR] Admin secret not found in config!$_kReset');
+      return;
+    }
+
+    final adminSecret = adminSecretMatch.group(1);
+    final client = HttpClient();
+    final request = await client.postUrl(
+      Uri.parse('http://127.0.0.1:12852/admin/truck/changePassword'),
+    );
+    request.headers.set('content-type', 'application/json');
+
+    final body = jsonEncode({
+      'adminSecret': adminSecret,
+      'email': email,
+      'newPassword': newPassword,
+    });
+
+    request.write(body);
+    final response = await request.close();
+    final responseBody = await response.transform(utf8.decoder).join();
+    client.close();
+
+    final data = jsonDecode(responseBody);
+
+    if (response.statusCode == 200 && data['isSuccess'] == true) {
+      print('\n$_kGreen[SUCCESS] Password changed successfully!$_kReset\n');
+      print('${_kBold}Updated Account:$_kReset');
+      print('  Truck ID:     ${data['data']['truckId']}');
+      print('  Email:        ${data['data']['email']}');
+      print('  New Password: ${data['data']['newPassword']}');
+      print('\n${_kYellow}Save the new password securely!$_kReset');
+    } else {
+      print(
+        '\n$_kRed[ERROR] Failed to change password: ${data['error'] ?? 'Unknown error'}$_kReset',
+      );
+    }
+  } catch (e) {
+    print('\n$_kRed[ERROR] Request failed: $e$_kReset');
+    print(
+      '${_kYellow}Make sure the server is running (option 1 or 2).$_kReset',
+    );
+  }
 }
